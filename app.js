@@ -88,6 +88,10 @@ const textbooksBySubject = {
   ],
   chemistry: [
     {
+      title: "Открыть таблицу Менделеева",
+      href: "textbooks/mendeleev-table.pdf"
+    },
+    {
       title: "Открыть учебник по химии",
       href: "textbooks/chemistry-10-profile-kartsova-levkin.pdf"
     }
