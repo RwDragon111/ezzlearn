@@ -593,6 +593,13 @@ body.dark .selection-counter {
   box-shadow: 0 12px 28px rgba(101, 65, 24, 0.11);
 }
 
+.problem-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+  box-shadow: none;
+}
+
 .problem-card span {
   font-family: "Bitter", Georgia, serif;
   font-size: 1.15rem;
@@ -764,6 +771,46 @@ body.dark .selection-counter {
   color: var(--accent-2);
   font-weight: 800;
   line-height: 1.55;
+}
+
+.feedback-note.success {
+  color: var(--success);
+}
+
+.feedback-note.danger {
+  color: var(--danger);
+}
+
+.math-task-card {
+  overflow: hidden;
+}
+
+.math-task-text {
+  font-size: 1.12rem;
+}
+
+.math-task-text p {
+  margin: 0 0 14px;
+}
+
+.math-task-text .center,
+.math-task-text [align="center"] {
+  text-align: center;
+}
+
+.math-task-text img {
+  max-width: min(100%, 760px);
+  height: auto;
+  vertical-align: middle;
+}
+
+.math-task-text img:not(.math) {
+  display: block;
+  margin: 14px auto;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: #fff;
 }
 
 .split-layout {

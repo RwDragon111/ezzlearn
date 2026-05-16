@@ -71,6 +71,25 @@ const physicsProblemTaskMap = new Map(
     topic.tasks.map((task) => [task.id, { ...task, topicId: topic.id, topicTitle: topic.title, groupId: topic.groupId, groupTitle: topic.groupTitle, type: topic.type, sectionId: topic.sectionId, sectionTitle: topic.sectionTitle }])
   )
 );
+const mathTasks = window.MATH_EGE_TASKS || [];
+const mathTaskMap = new Map(mathTasks.map((task) => [task.id, task]));
+const mathTasksByNumber = mathTasks.reduce((groups, task) => {
+  if (!groups.has(task.number)) {
+    groups.set(task.number, []);
+  }
+
+  groups.get(task.number).push(task);
+  return groups;
+}, new Map());
+const mathNumbers = Array.from({ length: 12 }, (_, index) => index + 1).map((number) => {
+  const tasks = mathTasksByNumber.get(number) || [];
+
+  return {
+    number,
+    title: tasks[0]?.title || `№${number}`,
+    count: tasks.length
+  };
+});
 
 const subjects = [
   { id: "russian", title: "Русский язык", text: "Исключения, правила и ошибкоопасные слова." },
@@ -138,6 +157,7 @@ const state = {
   },
   physicsSession: null,
   physicsProblemSession: null,
+  mathSession: null,
   locked: false,
   timer: null
 };
@@ -187,6 +207,8 @@ document.addEventListener("click", (event) => {
         openRussian();
       } else if (value === "physics") {
         openPhysics();
+      } else if (value === "math") {
+        openMath();
       } else {
         openPlaceholder(value);
       }
@@ -294,6 +316,21 @@ document.addEventListener("click", (event) => {
     case "physics-play-again":
       startPhysicsGame();
       break;
+    case "math-open-game":
+      openMathTopics();
+      break;
+    case "math-task-number":
+      openMathPractice(Number(value));
+      break;
+    case "math-check-answer":
+      checkMathAnswer();
+      break;
+    case "math-next-task":
+      nextMathTask();
+      break;
+    case "math-back-topics":
+      openMathTopics();
+      break;
     default:
       break;
   }
@@ -316,6 +353,13 @@ document.addEventListener("input", (event) => {
   if (problemAnswer && state.physicsProblemSession) {
     state.physicsProblemSession.userAnswer = problemAnswer.value;
     state.physicsProblemSession.feedback = null;
+  }
+
+  const mathAnswer = event.target.closest("input[data-action='math-answer']");
+
+  if (mathAnswer && state.mathSession) {
+    state.mathSession.userAnswer = mathAnswer.value;
+    state.mathSession.feedback = null;
   }
 });
 
@@ -344,6 +388,7 @@ function goHome() {
   state.customSession = null;
   state.physicsSession = null;
   state.physicsProblemSession = null;
+  state.mathSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -358,6 +403,7 @@ function openRussian() {
   state.customSession = null;
   state.physicsSession = null;
   state.physicsProblemSession = null;
+  state.mathSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -372,6 +418,22 @@ function openPhysics() {
   state.customSession = null;
   state.physicsSession = null;
   state.physicsProblemSession = null;
+  state.mathSession = null;
+  state.mistakes = 0;
+  state.locked = false;
+  render();
+}
+
+function openMath() {
+  clearPendingTimer();
+  state.route = "math";
+  state.subjectId = "math";
+  state.screen = "intro";
+  state.session = null;
+  state.customSession = null;
+  state.physicsSession = null;
+  state.physicsProblemSession = null;
+  state.mathSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -381,6 +443,7 @@ function openPlaceholder(subjectId) {
   state.route = "placeholder";
   state.subjectId = subjectId;
   state.physicsProblemSession = null;
+  state.mathSession = null;
   render();
 }
 
@@ -809,6 +872,21 @@ function render() {
     return;
   }
 
+  if (state.route === "math") {
+    renderMathIntro();
+    return;
+  }
+
+  if (state.route === "math-topics") {
+    renderMathTopics();
+    return;
+  }
+
+  if (state.route === "math-practice") {
+    renderMathPractice();
+    return;
+  }
+
   if (state.route === "placeholder") {
     renderPlaceholder();
     return;
@@ -869,6 +947,7 @@ function startPhysicsGame() {
   state.session = null;
   state.customSession = null;
   state.physicsProblemSession = null;
+  state.mathSession = null;
   state.physicsSession = {
     rounds,
     index: 0,
@@ -885,6 +964,7 @@ function openPhysicsProblems() {
   state.screen = "physics-problems";
   state.physicsSession = null;
   state.physicsProblemSession = null;
+  state.mathSession = null;
   state.locked = false;
   render();
 }
@@ -1016,6 +1096,91 @@ function checkPhysicsProblemAnswer() {
   render();
 }
 
+function openMathTopics() {
+  clearPendingTimer();
+  state.route = "math-topics";
+  state.subjectId = "math";
+  state.screen = "math-topics";
+  state.session = null;
+  state.customSession = null;
+  state.physicsSession = null;
+  state.physicsProblemSession = null;
+  state.mathSession = null;
+  state.locked = false;
+  render();
+}
+
+function openMathPractice(number) {
+  const tasks = mathTasksByNumber.get(number) || [];
+
+  if (tasks.length === 0) {
+    openMathTopics();
+    return;
+  }
+
+  state.route = "math-practice";
+  state.subjectId = "math";
+  state.screen = "math-practice";
+  state.mathSession = {
+    number,
+    taskId: sample(tasks).id,
+    userAnswer: "",
+    feedback: null,
+    solved: 0,
+    mistakes: 0,
+    seenIds: new Set()
+  };
+  state.mathSession.seenIds.add(state.mathSession.taskId);
+  render();
+}
+
+function nextMathTask() {
+  const session = state.mathSession;
+
+  if (!session) {
+    openMathTopics();
+    return;
+  }
+
+  const tasks = mathTasksByNumber.get(session.number) || [];
+  const available = tasks.filter((task) => !session.seenIds.has(task.id));
+  const nextTask = sample(available.length ? available : tasks);
+
+  if (!nextTask) {
+    openMathTopics();
+    return;
+  }
+
+  if (available.length === 0) {
+    session.seenIds.clear();
+  }
+
+  session.taskId = nextTask.id;
+  session.userAnswer = "";
+  session.feedback = null;
+  session.seenIds.add(nextTask.id);
+  render();
+}
+
+function checkMathAnswer() {
+  const task = currentMathTask();
+  const session = state.mathSession;
+
+  if (!task || !session) {
+    return;
+  }
+
+  if (isMathAnswerCorrect(session.userAnswer, task.answer)) {
+    session.feedback = { type: "success", text: "Правильно." };
+    session.solved += 1;
+  } else {
+    session.feedback = { type: "danger", text: `Пока не совпало. Правильный ответ: ${task.answer}` };
+    session.mistakes += 1;
+  }
+
+  render();
+}
+
 function buildPhysicsRound(entry) {
   const direction = Math.random() < 0.5 ? "name-to-formula" : "formula-to-name";
   const distractors = pickMany(
@@ -1075,6 +1240,10 @@ function currentPhysicsProblemTask() {
   return physicsProblemTaskMap.get(state.physicsProblemSession?.taskId);
 }
 
+function currentMathTask() {
+  return mathTaskMap.get(state.mathSession?.taskId);
+}
+
 function normalizePhysicsAnswer(value) {
   return normalizeWord(fixPhysicsOcrDigits(value))
     .replace(/ё/g, "е")
@@ -1096,6 +1265,51 @@ function fixPhysicsOcrDigits(value) {
     .replace(/[Юю]/g, "10")
     .replace(/[Зз](?=\s*[сc]\b)/g, "3")
     .replace(/[Оо]/g, "0");
+}
+
+function isMathAnswerCorrect(userValue, correctValue) {
+  const userAnswer = normalizeMathAnswer(userValue);
+  const correctAnswers = splitMathAnswers(correctValue).map(normalizeMathAnswer).filter(Boolean);
+
+  if (!userAnswer || correctAnswers.length === 0) {
+    return false;
+  }
+
+  if (correctAnswers.includes(userAnswer)) {
+    return true;
+  }
+
+  const userNumber = mathAnswerToNumber(userAnswer);
+
+  return correctAnswers.some((answer) => {
+    const correctNumber = mathAnswerToNumber(answer);
+    return userNumber !== null && correctNumber !== null && Math.abs(userNumber - correctNumber) < 1e-9;
+  });
+}
+
+function splitMathAnswers(value) {
+  return String(value || "")
+    .replace(/<[^>]*>/g, "")
+    .split(/\s*(?:;|\bили\b)\s*/i);
+}
+
+function normalizeMathAnswer(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, "")
+    .replace(/[−–—]/g, "-")
+    .replace(/,/g, ".")
+    .replace(/\s+/g, "")
+    .replace(/[()]/g, "");
+}
+
+function mathAnswerToNumber(value) {
+  if (!/^-?\d+(?:\.\d+)?$/.test(value)) {
+    return null;
+  }
+
+  return Number(value);
 }
 
 function renderPhysicsIntro() {
@@ -1410,6 +1624,113 @@ function renderPhysicsProblemAnswerBox(task) {
   `;
 }
 
+function renderMathIntro() {
+  dom.app.innerHTML = `
+    <section class="hero-panel russian-start">
+      <div>
+        <p class="kicker">Математика ЕГЭ</p>
+        <h1 class="main-title">Первая часть</h1>
+      </div>
+      <div class="start-actions">
+        <button class="action-button primary" data-action="math-open-game">Решать задания</button>
+        ${renderTextbookLinks("math")}
+      </div>
+    </section>
+  `;
+}
+
+function renderMathTopics() {
+  const total = mathTasks.length;
+
+  dom.app.innerHTML = `
+    <section class="game-panel">
+      <div class="screen">
+        <div class="screen-head">
+          <div>
+            <p class="kicker">Математика ЕГЭ · первая часть</p>
+            <h1 class="main-title">Выбери номер задания</h1>
+            <p class="screen-text">${formatTaskCount(total)} из разделов банка ФИПИ.</p>
+          </div>
+        </div>
+
+        <div class="problem-section-grid math-topic-grid">
+          ${mathNumbers
+            .map((item) => `
+              <button class="problem-card" data-action="math-task-number" data-value="${item.number}" ${item.count ? "" : "disabled"}>
+                <span>${escapeHtml(item.title)}</span>
+                <small>${formatTaskCount(item.count)}</small>
+              </button>
+            `)
+            .join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderMathPractice() {
+  const task = currentMathTask();
+  const session = state.mathSession;
+
+  if (!task || !session) {
+    renderMathTopics();
+    return;
+  }
+
+  dom.app.innerHTML = `
+    <section class="game-panel problem-view-panel">
+      <div class="screen">
+        <div class="screen-head">
+          <div>
+            <p class="kicker">Математика ЕГЭ · задание ${task.number}</p>
+            <h1 class="screen-title">${escapeHtml(task.title)}</h1>
+          </div>
+          <div class="mistake-counter">Ошибок: ${session.mistakes}</div>
+        </div>
+
+        <article class="problem-task-card math-task-card">
+          <div class="problem-task-head">
+            <span class="stage-badge">Краткий ответ</span>
+            <span class="mini-meta">${escapeHtml(task.source || "Банк ФИПИ")}</span>
+          </div>
+          <div class="problem-task-text math-task-text">${task.html}</div>
+          ${renderMathAnswerBox(task)}
+        </article>
+
+        <div class="action-row">
+          <button class="action-button secondary" data-action="math-back-topics">К номерам</button>
+          <button class="action-button secondary" data-action="math-next-task">Другая задача</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderMathAnswerBox(task) {
+  const feedback = state.mathSession.feedback;
+  const feedbackClass = feedback?.type === "danger" ? "danger" : feedback?.type === "success" ? "success" : "";
+
+  return `
+    <div class="problem-answer-panel">
+      <label class="problem-answer-label" for="math-answer">Твой ответ</label>
+      <div class="problem-answer-row">
+        <input
+          id="math-answer"
+          class="problem-answer-input"
+          type="text"
+          inputmode="decimal"
+          autocomplete="off"
+          placeholder="Например: 42"
+          value="${escapeHtml(state.mathSession.userAnswer || "")}"
+          data-action="math-answer"
+        >
+        <button class="action-button primary" data-action="math-check-answer">Проверить</button>
+      </div>
+      ${feedback ? `<p class="feedback-note ${feedbackClass}">${escapeHtml(feedback.text)}</p>` : ""}
+    </div>
+  `;
+}
+
 function renderProblemText(text) {
   return escapeHtml(text)
     .split(/\n+/)
@@ -1427,6 +1748,20 @@ function countPhysicsItemTasks(item) {
   }
 
   return item.topics.reduce((sum, topic) => sum + topic.tasks.length, 0);
+}
+
+function formatTaskCount(count) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  const word = lastTwo >= 11 && lastTwo <= 14
+    ? "заданий"
+    : last === 1
+      ? "задание"
+      : last >= 2 && last <= 4
+        ? "задания"
+        : "заданий";
+
+  return `${count} ${word}`;
 }
 
 function renderPhysicsProgress() {
