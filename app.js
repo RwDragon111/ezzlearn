@@ -401,6 +401,10 @@ document.addEventListener("keydown", (event) => {
   if (problemAnswer && state.physicsProblemSession) {
     event.preventDefault();
     state.physicsProblemSession.userAnswer = problemAnswer.value;
+    if (state.physicsProblemSession.feedback && isCurrentPhysicsProblemAnswerCorrect()) {
+      nextPhysicsProblemTask();
+      return;
+    }
     checkPhysicsProblemAnswer();
     return;
   }
@@ -410,6 +414,10 @@ document.addEventListener("keydown", (event) => {
   if (mathAnswer && state.mathSession) {
     event.preventDefault();
     state.mathSession.userAnswer = mathAnswer.value;
+    if (state.mathSession.feedback?.type === "success" && isCurrentMathAnswerCorrect()) {
+      nextMathTask();
+      return;
+    }
     checkMathAnswer();
   }
 });
@@ -1316,6 +1324,34 @@ function showPhysicsProblemAnswer() {
   render();
 }
 
+function nextPhysicsProblemTask() {
+  const session = state.physicsProblemSession;
+  const topic = currentPhysicsProblemTopic();
+
+  if (!session || !topic?.tasks?.length) {
+    openPhysicsProblems();
+    return;
+  }
+
+  const currentIndex = topic.tasks.findIndex((task) => task.id === session.taskId);
+  const nextTask = topic.tasks[(currentIndex + 1) % topic.tasks.length];
+
+  if (!nextTask) {
+    openPhysicsProblemPractice(topic.id);
+    return;
+  }
+
+  state.physicsProblemSession = {
+    ...session,
+    taskId: nextTask.id,
+    showSolution: false,
+    userAnswer: "",
+    feedback: null
+  };
+  render();
+  focusAnswerInput("physics-problem-answer");
+}
+
 function checkPhysicsProblemAnswer() {
   const task = currentPhysicsProblemTask();
 
@@ -1323,14 +1359,11 @@ function checkPhysicsProblemAnswer() {
     return;
   }
 
-  const userAnswer = normalizePhysicsAnswer(state.physicsProblemSession.userAnswer || "");
   const correctAnswer = normalizePhysicsAnswer(task.answer || "");
-  const userNumber = extractPhysicsNumber(state.physicsProblemSession.userAnswer || "");
-  const correctNumber = extractPhysicsNumber(task.answer || "");
 
   if (!correctAnswer) {
     state.physicsProblemSession.feedback = "Ответ для этой задачи не распознался автоматически. Можно решить и сверить по сборнику.";
-  } else if (userAnswer && (userAnswer === correctAnswer || (userNumber !== null && correctNumber !== null && userNumber === correctNumber))) {
+  } else if (isCurrentPhysicsProblemAnswerCorrect()) {
     state.physicsProblemSession.feedback = "Правильно.";
     recordSolvedTask("physics", {
       id: task.id,
@@ -1342,6 +1375,26 @@ function checkPhysicsProblemAnswer() {
     state.physicsProblemSession.feedback = `Пока не совпало. Правильный ответ: ${task.answer}`;
   }
   render();
+  focusAnswerInput("physics-problem-answer");
+}
+
+function isCurrentPhysicsProblemAnswerCorrect() {
+  const task = currentPhysicsProblemTask();
+
+  if (!task || !state.physicsProblemSession) {
+    return false;
+  }
+
+  const userAnswer = normalizePhysicsAnswer(state.physicsProblemSession.userAnswer || "");
+  const correctAnswer = normalizePhysicsAnswer(task.answer || "");
+  const userNumber = extractPhysicsNumber(state.physicsProblemSession.userAnswer || "");
+  const correctNumber = extractPhysicsNumber(task.answer || "");
+
+  return Boolean(
+    correctAnswer &&
+    userAnswer &&
+    (userAnswer === correctAnswer || (userNumber !== null && correctNumber !== null && userNumber === correctNumber))
+  );
 }
 
 function openMathTopics() {
@@ -1432,6 +1485,7 @@ function nextMathTask() {
   session.feedback = null;
   session.seenIds.add(nextTask.id);
   render();
+  focusAnswerInput("math-answer");
 }
 
 function checkMathAnswer() {
@@ -1457,6 +1511,20 @@ function checkMathAnswer() {
   }
 
   render();
+  focusAnswerInput("math-answer");
+}
+
+function focusAnswerInput(action) {
+  window.setTimeout(() => {
+    dom.app.querySelector(`input[data-action='${action}']`)?.focus({ preventScroll: true });
+  }, 0);
+}
+
+function isCurrentMathAnswerCorrect() {
+  const task = currentMathTask();
+  const session = state.mathSession;
+
+  return Boolean(task && session && isMathAnswerCorrect(session.userAnswer, task.answer));
 }
 
 async function handleAuthForm(form) {
