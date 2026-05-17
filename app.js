@@ -391,6 +391,29 @@ document.addEventListener("input", (event) => {
   }
 });
 
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing || state.locked) {
+    return;
+  }
+
+  const problemAnswer = event.target.closest("input[data-action='physics-problem-answer']");
+
+  if (problemAnswer && state.physicsProblemSession) {
+    event.preventDefault();
+    state.physicsProblemSession.userAnswer = problemAnswer.value;
+    checkPhysicsProblemAnswer();
+    return;
+  }
+
+  const mathAnswer = event.target.closest("input[data-action='math-answer']");
+
+  if (mathAnswer && state.mathSession) {
+    event.preventDefault();
+    state.mathSession.userAnswer = mathAnswer.value;
+    checkMathAnswer();
+  }
+});
+
 function handleGlobalAction(action) {
   if (action === "back") {
     goHome();
