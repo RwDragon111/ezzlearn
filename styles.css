@@ -1002,6 +1002,32 @@ body.dark .math-task-text img.math {
   background: #fff;
 }
 
+.math-task-scan {
+  display: grid;
+  gap: 14px;
+}
+
+.math-task-scan .math-task-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  padding: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.math-task-fallback {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .split-layout {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.25fr);
