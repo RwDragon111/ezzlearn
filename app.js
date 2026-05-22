@@ -39,6 +39,9 @@ const spellingDeck = spellingTasks
     };
   })
   .filter(Boolean);
+const stressTasks = (window.STRESS_TASKS || []).filter(
+  (task) => task?.word && Number.isInteger(task.stressIndex)
+);
 const physicsSections = window.PHYSICS_SECTIONS || [];
 const physicsFormulas = physicsSections.flatMap((section) =>
   section.formulas.map((formula) => ({
@@ -161,6 +164,7 @@ const state = {
   physicsSession: null,
   physicsProblemSession: null,
   mathSession: null,
+  stressSession: null,
   profileMode: "login",
   profileMessage: null,
   locked: false,
@@ -222,6 +226,9 @@ document.addEventListener("click", (event) => {
     case "start-game":
       startGame();
       break;
+    case "start-stress-game":
+      startStressGame();
+      break;
     case "configure-game":
       openConfigurator();
       break;
@@ -275,6 +282,12 @@ document.addEventListener("click", (event) => {
       break;
     case "custom-answer":
       handleCustomAnswer(value);
+      break;
+    case "stress-answer":
+      handleStressAnswer(value);
+      break;
+    case "stress-play-again":
+      startStressGame();
       break;
     case "toggle-custom-risky":
       toggleCustomRiskySelection(value);
@@ -453,6 +466,7 @@ function goHome() {
   state.physicsSession = null;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.stressSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -468,6 +482,7 @@ function openRussian() {
   state.physicsSession = null;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.stressSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -483,6 +498,7 @@ function openPhysics() {
   state.physicsSession = null;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.stressSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -498,6 +514,7 @@ function openMath() {
   state.physicsSession = null;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.stressSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -518,12 +535,14 @@ function openPlaceholder(subjectId) {
   state.subjectId = subjectId;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.stressSession = null;
   render();
 }
 
 function startGame() {
   clearPendingTimer();
   state.customSession = null;
+  state.stressSession = null;
 
   if ((exceptionDeck.length === 0 && riskyDeck.length === 0) || spellingDeck.length === 0) {
     state.route = "russian-game";
@@ -566,6 +585,38 @@ function startGame() {
   render();
 }
 
+function startStressGame() {
+  clearPendingTimer();
+
+  if (stressTasks.length === 0) {
+    state.route = "russian-game";
+    state.subjectId = "russian";
+    state.screen = "empty";
+    state.stressSession = null;
+    render();
+    return;
+  }
+
+  state.route = "russian-game";
+  state.subjectId = "russian";
+  state.screen = "stress-game";
+  state.session = null;
+  state.customSession = null;
+  state.physicsSession = null;
+  state.physicsProblemSession = null;
+  state.mathSession = null;
+  state.stressSession = {
+    tasks: stressTasks,
+    index: 0,
+    mistakes: 0,
+    solved: 0,
+    wrongIndices: new Set(),
+    correctIndex: null
+  };
+  state.locked = false;
+  render();
+}
+
 function openConfigurator() {
   clearPendingTimer();
   state.route = "russian-game";
@@ -573,6 +624,7 @@ function openConfigurator() {
   state.screen = "config";
   state.session = null;
   state.customSession = null;
+  state.stressSession = null;
   state.physicsSession = null;
   state.locked = false;
   state.config.count = clampCount(state.config.count);
@@ -599,6 +651,7 @@ function startCustomPractice() {
   state.screen = "custom-practice";
   state.session = null;
   state.physicsSession = null;
+  state.stressSession = null;
   state.customSession = {
     mode,
     count,
@@ -806,6 +859,51 @@ function handleCustomAnswer(answer) {
   }, 650);
 }
 
+function handleStressAnswer(value) {
+  const task = currentStressTask();
+  const session = state.stressSession;
+  const index = Number(value);
+
+  if (!task || !session || Number.isNaN(index)) {
+    return;
+  }
+
+  if (index !== task.stressIndex) {
+    if (!session.wrongIndices.has(index)) {
+      session.mistakes += 1;
+      session.wrongIndices.add(index);
+    }
+
+    render();
+    return;
+  }
+
+  session.correctIndex = index;
+  session.solved += 1;
+
+  lockAndAdvance(() => {
+    advanceStressGame();
+  }, 650);
+}
+
+function advanceStressGame() {
+  const session = state.stressSession;
+
+  if (!session) {
+    openRussian();
+    return;
+  }
+
+  if (session.index >= session.tasks.length - 1) {
+    state.screen = "stress-finish";
+    return;
+  }
+
+  session.index += 1;
+  session.wrongIndices = new Set();
+  session.correctIndex = null;
+}
+
 function toggleCustomRiskySelection(word) {
   const task = currentCustomTask();
 
@@ -887,6 +985,10 @@ function currentRound() {
 
 function currentCustomTask() {
   return state.customSession.tasks[state.customSession.index];
+}
+
+function currentStressTask() {
+  return state.stressSession?.tasks[state.stressSession.index];
 }
 
 function expectedSeedAnswer() {
@@ -1181,6 +1283,17 @@ function renderRussianIntro() {
       </div>
     </section>
 
+    <section class="hero-panel russian-start stress-start-panel">
+      <div>
+        <p class="kicker">Русский язык · ударения</p>
+        <h1 class="main-title">Ударения</h1>
+        <p class="lead">Выбирай букву, на которую падает ударение. Слова идут по словарю.</p>
+      </div>
+      <div class="start-actions">
+        <button class="action-button primary" data-action="start-stress-game" ${stressTasks.length === 0 ? "disabled" : ""}>Начать игру</button>
+      </div>
+    </section>
+
     <section class="hero-panel show-table-panel">
       <button class="action-button secondary" data-action="show-exceptions">Показать все исключения</button>
     </section>
@@ -1198,6 +1311,7 @@ function startPhysicsGame() {
   state.customSession = null;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.stressSession = null;
   state.physicsSession = {
     rounds,
     index: 0,
@@ -1215,6 +1329,7 @@ function openPhysicsProblems() {
   state.physicsSession = null;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.stressSession = null;
   state.locked = false;
   render();
 }
@@ -1407,6 +1522,7 @@ function openMathTopics() {
   state.physicsSession = null;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.stressSession = null;
   state.locked = false;
   render();
 }
@@ -2471,6 +2587,12 @@ function renderRussianGame() {
     case "custom-finish":
       renderCustomFinish();
       break;
+    case "stress-game":
+      renderStressGame();
+      break;
+    case "stress-finish":
+      renderStressFinish();
+      break;
     case "letter-pick":
       renderLetterPick();
       break;
@@ -2789,6 +2911,95 @@ function renderCustomRisky() {
       </div>
     </section>
   `;
+}
+
+function renderStressGame() {
+  const task = currentStressTask();
+  const session = state.stressSession;
+
+  if (!task || !session) {
+    renderRussianIntro();
+    return;
+  }
+
+  dom.app.innerHTML = `
+    <section class="game-panel">
+      <div class="screen stress-screen">
+        <div class="custom-progress">
+          <span>Слово ${session.index + 1} из ${session.tasks.length}</span>
+          <span>${Math.round((session.index / session.tasks.length) * 100)}%</span>
+        </div>
+
+        <div class="screen-head">
+          <div>
+            <div class="stage-badge">Ударения</div>
+            <h2 class="screen-title">Выбери ударную букву</h2>
+            ${task.hint ? `<p class="mini-meta">${escapeHtml(task.hint)}</p>` : ""}
+          </div>
+          <div class="mistake-counter">Ошибок: ${session.mistakes}</div>
+        </div>
+
+        <div class="stress-word-grid" aria-label="Слово ${escapeHtml(task.word)}">
+          ${Array.from(task.word)
+            .map((letter, index) => `
+              <button
+                class="stress-letter ${getStressLetterState(index)}"
+                data-action="stress-answer"
+                data-value="${index}"
+                ${state.locked ? "disabled" : ""}
+              >
+                ${escapeHtml(letter)}
+              </button>
+            `)
+            .join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderStressFinish() {
+  const session = state.stressSession;
+
+  dom.app.innerHTML = `
+    <section class="game-panel">
+      <div class="screen">
+        <div class="screen-head">
+          <div>
+            <div class="stage-badge">Тренировка завершена</div>
+            <h2 class="finish-score">Ударения</h2>
+            <p class="finish-subtitle">
+              Выполнено слов: ${session?.tasks.length || 0}. Ошибок: ${session?.mistakes || 0}.
+            </p>
+          </div>
+        </div>
+
+        <div class="action-row">
+          <button class="action-button primary" data-action="stress-play-again">Повторить ударения</button>
+          <button class="action-button secondary" data-action="russian-home">Русский язык</button>
+          <button class="action-button secondary" data-action="go-home">На главный экран</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function getStressLetterState(index) {
+  const session = state.stressSession;
+
+  if (!session) {
+    return "";
+  }
+
+  if (session.correctIndex === index) {
+    return "correct";
+  }
+
+  if (session.wrongIndices.has(index)) {
+    return "wrong";
+  }
+
+  return "";
 }
 
 function renderCustomFinish() {

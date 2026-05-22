@@ -570,6 +570,53 @@ body.dark .selection-counter {
   color: var(--warning);
 }
 
+.stress-screen {
+  gap: 24px;
+}
+
+.stress-word-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: clamp(8px, 1.6vw, 14px);
+  padding: clamp(20px, 4vw, 34px);
+  border-radius: var(--radius-xl);
+  background: var(--word-panel);
+  border: 1px solid var(--word-panel-border);
+  box-shadow: var(--word-panel-shadow);
+}
+
+.stress-letter {
+  width: clamp(44px, 7vw, 72px);
+  height: clamp(48px, 7vw, 78px);
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-family: "Bitter", Georgia, serif;
+  font-size: clamp(1.35rem, 3vw, 2.35rem);
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(68, 42, 20, 0.08);
+  transition: transform 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.stress-letter:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.stress-letter.correct {
+  background: var(--success-soft);
+  border-color: rgba(29, 143, 86, 0.34);
+  color: var(--success);
+}
+
+.stress-letter.wrong {
+  background: var(--danger-soft);
+  border-color: rgba(197, 60, 47, 0.34);
+  color: var(--danger);
+}
+
 .action-row {
   display: flex;
   gap: 12px;
