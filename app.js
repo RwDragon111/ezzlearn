@@ -140,11 +140,18 @@ const customModes = [
 const customModeMap = new Map(customModes.map((mode) => [mode.id, mode]));
 const authUsersKey = "ezzlearn-users-v1";
 const authCurrentUserKey = "ezzlearn-current-user-v1";
+const authRemoteProfileKey = "ezzlearn-remote-profile-v1";
 const supabaseUrl = "https://vwkcfetuuykxzzuncmcc.supabase.co";
 const supabasePublishableKey = "sb_publishable_7VjHTYBCslifxQvNsHSMkg_lr1jeIF2";
 const supabaseProgressTable = "user_progress";
 const supabaseClient = window.supabase?.createClient
-  ? window.supabase.createClient(supabaseUrl, supabasePublishableKey)
+  ? window.supabase.createClient(supabaseUrl, supabasePublishableKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false
+      }
+    })
   : null;
 const leaderboardSubjects = [
   { id: "math", title: "Математика" },
@@ -1800,7 +1807,16 @@ function initializeSupabaseAuth() {
     return;
   }
 
-  state.authLoading = true;
+  const cachedProfile = loadCachedRemoteProfile();
+
+  if (cachedProfile) {
+    state.remoteUser = cachedProfile;
+    state.authReady = true;
+    state.authLoading = false;
+  } else {
+    state.authLoading = true;
+  }
+
   supabaseClient.auth.getSession()
     .then(({ data }) => applySupabaseUser(data?.session?.user || null))
     .catch((error) => {
@@ -1816,8 +1832,8 @@ function initializeSupabaseAuth() {
   });
 }
 
-async function applySupabaseUser(user, options = {}) {
-  const { renderAfter = true } = options;
+function applySupabaseUser(user, options = {}) {
+  const { renderAfter = true, refreshStats = true } = options;
 
   if (!supabaseClient) {
     return;
@@ -1827,6 +1843,7 @@ async function applySupabaseUser(user, options = {}) {
     state.remoteUser = null;
     state.authLoading = false;
     state.authReady = true;
+    localStorage.removeItem(authRemoteProfileKey);
 
     if (renderAfter) {
       updateProfileButton();
@@ -1835,7 +1852,8 @@ async function applySupabaseUser(user, options = {}) {
     return;
   }
 
-  const stats = await loadRemoteProgress(user.id);
+  const cachedProfile = loadCachedRemoteProfile();
+  const cachedStats = cachedProfile?.id === user.id ? cachedProfile.stats : null;
 
   state.remoteUser = {
     id: user.id,
@@ -1843,14 +1861,19 @@ async function applySupabaseUser(user, options = {}) {
     provider: "supabase",
     email: user.email || "",
     username: getSupabaseUsername(user),
-    stats
+    stats: normalizeUserStats(cachedStats || state.remoteUser?.stats || createEmptyStats())
   };
   state.authLoading = false;
   state.authReady = true;
+  saveCachedRemoteProfile(state.remoteUser);
 
   if (renderAfter) {
     updateProfileButton();
     render();
+  }
+
+  if (refreshStats) {
+    refreshRemoteProgress(user.id);
   }
 }
 
@@ -1984,6 +2007,7 @@ async function logoutUser() {
   if (supabaseClient) {
     await supabaseClient.auth.signOut();
     state.remoteUser = null;
+    localStorage.removeItem(authRemoteProfileKey);
     state.profileMode = "login";
     setProfileMessage("success", "Ты вышел из профиля.");
     updateProfileButton();
@@ -2137,22 +2161,56 @@ async function signInWithUsername(username, password) {
   });
 }
 
+async function refreshRemoteProgress(userId) {
+  const stats = await loadRemoteProgress(userId);
+
+  if (!stats || !state.remoteUser || state.remoteUser.id !== userId) {
+    return;
+  }
+
+  state.remoteUser.stats = stats;
+  saveCachedRemoteProfile(state.remoteUser);
+  updateProfileButton();
+
+  if (state.route === "profile" || state.route === "math-practice" || state.route === "physics-problem-practice") {
+    render();
+  }
+}
+
 async function loadRemoteProgress(userId) {
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await withTimeout(supabaseClient
       .from(supabaseProgressTable)
-      .select("subject, task_id, task_number, display_number, title, solved_at")
-      .eq("user_id", userId);
+      .select("subject, task_id, task_number, display_number, title, solved_at, section_id, section_title")
+      .eq("user_id", userId), 7000);
 
     if (error) {
-      console.warn("Supabase progress load failed", error);
-      return createEmptyStats();
+      return loadRemoteProgressFallback(userId);
     }
 
     return normalizeRemoteStats(data || []);
   } catch (error) {
     console.warn("Supabase progress load failed", error);
-    return createEmptyStats();
+    return null;
+  }
+}
+
+async function loadRemoteProgressFallback(userId) {
+  try {
+    const { data, error } = await withTimeout(supabaseClient
+      .from(supabaseProgressTable)
+      .select("subject, task_id, task_number, display_number, title, solved_at")
+      .eq("user_id", userId), 7000);
+
+    if (error) {
+      console.warn("Supabase progress load failed", error);
+      return null;
+    }
+
+    return normalizeRemoteStats(data || []);
+  } catch (error) {
+    console.warn("Supabase progress load failed", error);
+    return null;
   }
 }
 
@@ -2216,6 +2274,40 @@ function saveUsers(users) {
   localStorage.setItem(authUsersKey, JSON.stringify(users));
 }
 
+function loadCachedRemoteProfile() {
+  try {
+    const profile = JSON.parse(localStorage.getItem(authRemoteProfileKey));
+
+    if (!profile?.id) {
+      return null;
+    }
+
+    return {
+      ...profile,
+      provider: "supabase",
+      key: profile.id,
+      stats: normalizeUserStats(profile.stats)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedRemoteProfile(user) {
+  if (!user?.id) {
+    return;
+  }
+
+  localStorage.setItem(authRemoteProfileKey, JSON.stringify({
+    id: user.id,
+    key: user.id,
+    provider: "supabase",
+    email: user.email || "",
+    username: user.username || "Профиль",
+    stats: normalizeUserStats(user.stats)
+  }));
+}
+
 function getActiveUser() {
   if (state.remoteUser) {
     state.remoteUser.stats = normalizeUserStats(state.remoteUser.stats);
@@ -2251,6 +2343,7 @@ function saveActiveUser(user) {
       ...user,
       stats: normalizeUserStats(user.stats)
     };
+    saveCachedRemoteProfile(state.remoteUser);
     return;
   }
 
@@ -2333,6 +2426,15 @@ function getSupabaseAuthErrorText(error) {
   return "Не получилось создать аккаунт. Попробуй другой логин или пароль.";
 }
 
+function withTimeout(promise, timeoutMs = 7000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error("Request timeout")), timeoutMs);
+    })
+  ]);
+}
+
 function normalizeRemoteStats(rows) {
   const stats = createEmptyStats();
 
@@ -2351,6 +2453,8 @@ function normalizeRemoteStats(rows) {
       id: row.task_id,
       number: row.task_number || null,
       displayNumber: row.display_number || row.task_number || null,
+      sectionId: row.section_id || null,
+      sectionTitle: row.section_title || null,
       title: row.title || "Задание",
       solvedAt: row.solved_at || new Date().toISOString()
     };
@@ -2416,26 +2520,34 @@ function getSolvedEntries(subject) {
 }
 
 async function loadLeaderboardRows(subject) {
-  const withSections = await supabaseClient
-    .from(supabaseProgressTable)
-    .select("user_id, username, subject, task_id, task_number, display_number, title, solved_at, section_id, section_title")
-    .eq("subject", subject);
+  try {
+    const withSections = await withTimeout(supabaseClient
+      .from(supabaseProgressTable)
+      .select("user_id, username, subject, task_id, task_number, display_number, title, solved_at, section_id, section_title")
+      .eq("subject", subject), 7000);
 
-  if (!withSections.error) {
-    return withSections.data || [];
+    if (!withSections.error) {
+      return withSections.data || [];
+    }
+  } catch (error) {
+    console.warn("Leaderboard load with sections failed", error);
   }
 
-  const fallback = await supabaseClient
-    .from(supabaseProgressTable)
-    .select("user_id, subject, task_id, task_number, display_number, title, solved_at")
-    .eq("subject", subject);
+  try {
+    const fallback = await withTimeout(supabaseClient
+      .from(supabaseProgressTable)
+      .select("user_id, subject, task_id, task_number, display_number, title, solved_at")
+      .eq("subject", subject), 7000);
 
-  if (fallback.error) {
-    state.leaderboard.message = "Нужно обновить таблицу в Supabase.";
-    return [];
+    if (!fallback.error) {
+      return fallback.data || [];
+    }
+  } catch (error) {
+    console.warn("Leaderboard fallback load failed", error);
   }
 
-  return fallback.data || [];
+  state.leaderboard.message = "Не получилось загрузить лидерборд.";
+  return [];
 }
 
 function getLeaderboardFilters(subject) {
