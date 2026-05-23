@@ -256,6 +256,13 @@ document.addEventListener("click", (event) => {
     case "close-exceptions":
       openRussian();
       break;
+    case "show-stresses":
+      state.route = "russian-stresses";
+      render();
+      break;
+    case "close-stresses":
+      openRussian();
+      break;
     case "spelling-answer":
       handleSpellingAnswer(value);
       break;
@@ -606,7 +613,7 @@ function startStressGame() {
   state.physicsProblemSession = null;
   state.mathSession = null;
   state.stressSession = {
-    tasks: stressTasks,
+    tasks: shuffleWords(stressTasks),
     index: 0,
     mistakes: 0,
     solved: 0,
@@ -1013,6 +1020,11 @@ function render() {
     return;
   }
 
+  if (state.route === "russian-stresses") {
+    renderStressTable();
+    return;
+  }
+
   if (state.route === "physics") {
     renderPhysicsIntro();
     return;
@@ -1287,7 +1299,6 @@ function renderRussianIntro() {
       <div>
         <p class="kicker">Русский язык · ударения</p>
         <h1 class="main-title">Ударения</h1>
-        <p class="lead">Выбирай букву, на которую падает ударение. Слова идут по словарю.</p>
       </div>
       <div class="start-actions">
         <button class="action-button primary" data-action="start-stress-game" ${stressTasks.length === 0 ? "disabled" : ""}>Начать игру</button>
@@ -1295,7 +1306,10 @@ function renderRussianIntro() {
     </section>
 
     <section class="hero-panel show-table-panel">
-      <button class="action-button secondary" data-action="show-exceptions">Показать все исключения</button>
+      <div class="start-actions">
+        <button class="action-button secondary" data-action="show-exceptions">Показать все исключения</button>
+        <button class="action-button secondary" data-action="show-stresses">Показать все ударения</button>
+      </div>
     </section>
   `;
 }
@@ -2571,6 +2585,56 @@ function renderRuleRow(rule) {
       <td>${escapeHtml(rule.risky.length ? rule.risky.join(", ") : "нет")}</td>
     </tr>
   `;
+}
+
+function renderStressTable() {
+  const sortedStressTasks = [...stressTasks].sort((first, second) =>
+    first.word.localeCompare(second.word, "ru")
+  );
+
+  dom.app.innerHTML = `
+    <section class="table-panel">
+      <div class="screen">
+        <div class="screen-head">
+          <div>
+            <p class="kicker">Русский язык</p>
+            <h1 class="main-title">Все ударения</h1>
+          </div>
+          <button class="close-button" type="button" data-action="close-stresses" aria-label="Закрыть таблицу">×</button>
+        </div>
+        <div class="exceptions-table-wrap">
+          <table class="exceptions-table stress-table">
+            <thead>
+              <tr>
+                <th>Слово</th>
+                <th>Ударение</th>
+                <th>Подсказка</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sortedStressTasks.map(renderStressRow).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderStressRow(task) {
+  return `
+    <tr>
+      <td>${escapeHtml(task.word)}</td>
+      <td><strong>${escapeHtml(formatStressedWord(task))}</strong></td>
+      <td>${escapeHtml(task.hint || "")}</td>
+    </tr>
+  `;
+}
+
+function formatStressedWord(task) {
+  return Array.from(task.word)
+    .map((letter, index) => (index === task.stressIndex ? letter.toLocaleUpperCase("ru-RU") : letter))
+    .join("");
 }
 
 function renderRussianGame() {
