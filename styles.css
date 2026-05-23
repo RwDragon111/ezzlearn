@@ -110,10 +110,14 @@ a,
   z-index: 20;
   top: 18px;
   left: 18px;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
 }
 
 .icon-button,
 .profile-button,
+.leaderboard-button,
 .back-button,
 .close-button,
 .action-button,
@@ -139,6 +143,7 @@ a,
 
 .icon-button:hover,
 .profile-button:hover,
+.leaderboard-button:hover,
 .back-button:hover,
 .close-button:hover,
 .action-button:hover,
@@ -155,6 +160,17 @@ a,
   max-width: min(260px, calc(100vw - 132px));
   min-height: 44px;
   padding: 6px 14px 6px 6px;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  border-color: var(--line);
+  box-shadow: 0 12px 28px rgba(26, 51, 67, 0.11);
+  font-weight: 900;
+}
+
+.leaderboard-button {
+  min-height: 40px;
+  padding: 9px 15px;
   border-radius: 999px;
   background: var(--surface-strong);
   color: var(--ink);
@@ -1013,6 +1029,69 @@ body.dark .selection-counter {
   font-weight: 800;
 }
 
+.leaderboard-tabs,
+.leaderboard-filter-grid,
+.leaderboard-list {
+  display: grid;
+  gap: 12px;
+}
+
+.leaderboard-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.leaderboard-filter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  margin-top: 4px;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+}
+
+.leaderboard-place {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(196, 107, 29, 0.14);
+  color: var(--accent-2);
+  font-family: "Bitter", Georgia, serif;
+  font-weight: 900;
+}
+
+.leaderboard-user {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.leaderboard-user strong,
+.leaderboard-score strong {
+  color: var(--ink);
+}
+
+.leaderboard-user span,
+.leaderboard-score span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.leaderboard-score {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
 .math-task-card {
   overflow: hidden;
 }
@@ -1439,6 +1518,21 @@ body.dark .math-task-text img.math {
 
   .profile-button {
     padding: 6px;
+  }
+
+  .leaderboard-button {
+    min-height: 34px;
+    padding: 7px 10px;
+    font-size: 0.82rem;
+  }
+
+  .leaderboard-row {
+    grid-template-columns: auto 1fr;
+  }
+
+  .leaderboard-score {
+    grid-column: 2;
+    justify-items: start;
   }
 
   .progress-track,

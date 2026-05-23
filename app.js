@@ -146,6 +146,10 @@ const supabaseProgressTable = "user_progress";
 const supabaseClient = window.supabase?.createClient
   ? window.supabase.createClient(supabaseUrl, supabasePublishableKey)
   : null;
+const leaderboardSubjects = [
+  { id: "math", title: "Математика" },
+  { id: "physics", title: "Физика" }
+];
 
 const dom = {
   app: document.getElementById("app"),
@@ -176,6 +180,13 @@ const state = {
   remoteUser: null,
   authReady: !supabaseClient,
   authLoading: false,
+  leaderboard: {
+    subject: "math",
+    section: "all",
+    rows: [],
+    loading: false,
+    message: ""
+  },
   locked: false,
   timer: null
 };
@@ -378,6 +389,13 @@ document.addEventListener("click", (event) => {
     case "logout":
       logoutUser();
       break;
+    case "leaderboard-subject":
+      openLeaderboard(value, "all");
+      break;
+    case "leaderboard-filter":
+      state.leaderboard.section = value;
+      render();
+      break;
     default:
       break;
   }
@@ -463,6 +481,11 @@ function handleGlobalAction(action) {
     return;
   }
 
+  if (action === "leaderboard") {
+    openLeaderboard(state.leaderboard.subject || "math", state.leaderboard.section || "all");
+    return;
+  }
+
   if (action === "theme") {
     toggleTheme();
     return;
@@ -544,6 +567,39 @@ function openProfile() {
   state.profileMode = getActiveUser() ? "account" : "login";
   state.profileMessage = null;
   state.locked = false;
+  render();
+}
+
+async function openLeaderboard(subject = "math", section = "all") {
+  clearPendingTimer();
+  state.route = "leaderboard";
+  state.subjectId = null;
+  state.leaderboard = {
+    subject,
+    section,
+    rows: [],
+    loading: true,
+    message: ""
+  };
+  state.locked = false;
+  render();
+
+  if (!supabaseClient) {
+    state.leaderboard.loading = false;
+    state.leaderboard.message = "Лидерборд доступен после подключения базы.";
+    render();
+    return;
+  }
+
+  if (!getActiveUser()) {
+    state.leaderboard.loading = false;
+    state.leaderboard.message = "Войди в профиль, чтобы открыть лидерборд.";
+    render();
+    return;
+  }
+
+  state.leaderboard.rows = await loadLeaderboardRows(subject);
+  state.leaderboard.loading = false;
   render();
 }
 
@@ -1090,6 +1146,11 @@ function render() {
     return;
   }
 
+  if (state.route === "leaderboard") {
+    renderLeaderboard();
+    return;
+  }
+
   if (state.route === "placeholder") {
     renderPlaceholder();
     return;
@@ -1138,6 +1199,72 @@ function renderProfile() {
         ${activeUser ? renderAccountProfile(activeUser) : renderAuthForms()}
       </div>
     </section>
+  `;
+}
+
+function renderLeaderboard() {
+  const subject = leaderboardSubjects.find((item) => item.id === state.leaderboard.subject) || leaderboardSubjects[0];
+  const filters = getLeaderboardFilters(subject.id);
+  const rows = buildLeaderboardRows(state.leaderboard.rows, subject.id, state.leaderboard.section);
+  const activeFilter = filters.find((filter) => filter.id === state.leaderboard.section) || filters[0];
+
+  dom.app.innerHTML = `
+    <section class="game-panel">
+      <div class="screen">
+        <div class="screen-head">
+          <div>
+            <p class="kicker">Лидерборд</p>
+            <h1 class="main-title">${escapeHtml(subject.title)}</h1>
+          </div>
+        </div>
+
+        <div class="leaderboard-tabs">
+          ${leaderboardSubjects.map((item) => `
+            <button class="action-button ${item.id === subject.id ? "primary" : "secondary"}" data-action="leaderboard-subject" data-value="${escapeHtml(item.id)}">
+              ${escapeHtml(item.title)}
+            </button>
+          `).join("")}
+        </div>
+
+        <div class="leaderboard-filter-grid">
+          ${filters.map((filter) => `
+            <button class="action-button ${filter.id === activeFilter.id ? "primary" : "secondary"}" data-action="leaderboard-filter" data-value="${escapeHtml(filter.id)}">
+              ${escapeHtml(filter.title)}
+            </button>
+          `).join("")}
+        </div>
+
+        ${state.leaderboard.loading
+          ? `<p class="mini-meta">Загрузка...</p>`
+          : state.leaderboard.message
+            ? `<p class="profile-message danger">${escapeHtml(state.leaderboard.message)}</p>`
+            : renderLeaderboardRows(rows)}
+      </div>
+    </section>
+  `;
+}
+
+function renderLeaderboardRows(rows) {
+  if (rows.length === 0) {
+    return `<p class="mini-meta">Пока пусто.</p>`;
+  }
+
+  return `
+    <div class="leaderboard-list">
+      ${rows.map((row, index) => `
+        <article class="leaderboard-row">
+          <div class="leaderboard-place">${index + 1}</div>
+          <div class="leaderboard-user">
+            <strong>${escapeHtml(row.username)}</strong>
+            <span>${escapeHtml(formatLeaderboardLastSolved(row.lastSolvedAt))}</span>
+          </div>
+          <div class="leaderboard-score">
+            <strong>${row.count}</strong>
+            <span>${formatTaskCount(row.count)}</span>
+          </div>
+        </article>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -1507,6 +1634,8 @@ function checkPhysicsProblemAnswer() {
       id: task.id,
       number: task.number,
       displayNumber: task.number,
+      sectionId: task.sectionId,
+      sectionTitle: task.sectionTitle,
       title: `${task.topicTitle || "Физика"} · задача ${task.number}`
     });
   } else {
@@ -1642,6 +1771,8 @@ function checkMathAnswer() {
       id: task.id,
       number: task.number,
       displayNumber: getMathTaskDisplayNumber(task),
+      sectionId: `math-${task.number}`,
+      sectionTitle: task.title,
       title: task.title
     });
   } else {
@@ -2037,9 +2168,12 @@ async function syncSolvedTaskToSupabase(subject, entry) {
     .upsert({
       user_id: state.remoteUser.id,
       subject,
+      username: state.remoteUser.username || "Игрок",
       task_id: String(entry.id),
       task_number: entry.number === null || entry.number === undefined ? null : String(entry.number),
       display_number: entry.displayNumber === null || entry.displayNumber === undefined ? null : String(entry.displayNumber),
+      section_id: entry.sectionId || null,
+      section_title: entry.sectionTitle || null,
       title: entry.title || "Задание",
       solved_at: entry.solvedAt || new Date().toISOString()
     }, {
@@ -2047,7 +2181,23 @@ async function syncSolvedTaskToSupabase(subject, entry) {
     });
 
   if (error) {
-    console.warn("Supabase progress sync failed", error);
+    const fallback = await supabaseClient
+      .from(supabaseProgressTable)
+      .upsert({
+        user_id: state.remoteUser.id,
+        subject,
+        task_id: String(entry.id),
+        task_number: entry.number === null || entry.number === undefined ? null : String(entry.number),
+        display_number: entry.displayNumber === null || entry.displayNumber === undefined ? null : String(entry.displayNumber),
+        title: entry.title || "Задание",
+        solved_at: entry.solvedAt || new Date().toISOString()
+      }, {
+        onConflict: "user_id,subject,task_id"
+      });
+
+    if (fallback.error) {
+      console.warn("Supabase progress sync failed", error);
+    }
   }
 }
 
@@ -2243,6 +2393,8 @@ function recordSolvedTask(subject, task) {
     id: task.id,
     number: task.number || null,
     displayNumber: task.displayNumber || task.number || null,
+    sectionId: task.sectionId || null,
+    sectionTitle: task.sectionTitle || null,
     title: task.title || "Задание",
     solvedAt: new Date().toISOString()
   };
@@ -2263,6 +2415,131 @@ function getSolvedEntries(subject) {
   return Object.values(activeUser?.stats?.[subject] || {}).sort((a, b) =>
     String(b.solvedAt || "").localeCompare(String(a.solvedAt || ""))
   );
+}
+
+async function loadLeaderboardRows(subject) {
+  const withSections = await supabaseClient
+    .from(supabaseProgressTable)
+    .select("user_id, username, subject, task_id, task_number, display_number, title, solved_at, section_id, section_title")
+    .eq("subject", subject);
+
+  if (!withSections.error) {
+    return withSections.data || [];
+  }
+
+  const fallback = await supabaseClient
+    .from(supabaseProgressTable)
+    .select("user_id, subject, task_id, task_number, display_number, title, solved_at")
+    .eq("subject", subject);
+
+  if (fallback.error) {
+    state.leaderboard.message = "Нужно обновить таблицу в Supabase.";
+    return [];
+  }
+
+  return fallback.data || [];
+}
+
+function getLeaderboardFilters(subject) {
+  if (subject === "math") {
+    return [
+      { id: "all", title: "Общий топ" },
+      ...mathNumbers
+        .filter((item) => item.count > 0)
+        .map((item) => ({
+          id: `math-${item.number}`,
+          title: `№${item.number}`
+        }))
+    ];
+  }
+
+  if (subject === "physics") {
+    return [
+      { id: "all", title: "Общий топ" },
+      ...(physicsProblemBank.sections || []).map((section) => ({
+        id: section.id,
+        title: section.title
+      }))
+    ];
+  }
+
+  return [{ id: "all", title: "Общий топ" }];
+}
+
+function buildLeaderboardRows(rows, subject, sectionId) {
+  const filteredRows = rows.filter((row) => {
+    if (row.subject !== subject) {
+      return false;
+    }
+
+    if (sectionId === "all") {
+      return true;
+    }
+
+    return getLeaderboardRowSectionId(row, subject) === sectionId;
+  });
+  const byUser = new Map();
+
+  filteredRows.forEach((row) => {
+    const userId = row.user_id || row.username || "unknown";
+    const entry = byUser.get(userId) || {
+      username: getLeaderboardUsername(row),
+      taskIds: new Set(),
+      lastSolvedAt: ""
+    };
+
+    entry.taskIds.add(row.task_id);
+
+    if (String(row.solved_at || "") > String(entry.lastSolvedAt || "")) {
+      entry.lastSolvedAt = row.solved_at || "";
+    }
+
+    byUser.set(userId, entry);
+  });
+
+  return [...byUser.values()]
+    .map((entry) => ({
+      username: entry.username,
+      count: entry.taskIds.size,
+      lastSolvedAt: entry.lastSolvedAt
+    }))
+    .sort((left, right) =>
+      right.count - left.count || String(right.lastSolvedAt || "").localeCompare(String(left.lastSolvedAt || ""))
+    )
+    .slice(0, 30);
+}
+
+function getLeaderboardRowSectionId(row, subject) {
+  if (row.section_id) {
+    return row.section_id;
+  }
+
+  if (subject === "math" && row.task_number) {
+    return `math-${row.task_number}`;
+  }
+
+  if (subject === "physics") {
+    const task = physicsProblemTaskMap.get(row.task_id);
+    return task?.sectionId || "";
+  }
+
+  return "";
+}
+
+function getLeaderboardUsername(row) {
+  if (row.username) {
+    return row.username;
+  }
+
+  if (state.remoteUser?.id && row.user_id === state.remoteUser.id) {
+    return state.remoteUser.username || "Ты";
+  }
+
+  return "Игрок";
+}
+
+function formatLeaderboardLastSolved(value) {
+  return value ? `последнее: ${formatSolvedDate(value)}` : "";
 }
 
 function buildPhysicsRound(entry) {
