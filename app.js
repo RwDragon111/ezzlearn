@@ -3001,7 +3001,7 @@ function renderStressGame() {
         <div class="screen-head">
           <div>
             <div class="stage-badge">Ударения</div>
-            <h2 class="screen-title">Выбери ударную букву</h2>
+            <h2 class="screen-title">Выбери ударную букву в слове ${escapeHtml(task.word)}</h2>
             ${task.hint ? `<p class="mini-meta">${escapeHtml(task.hint)}</p>` : ""}
           </div>
           <div class="mistake-counter">Ошибок: ${session.mistakes}</div>
