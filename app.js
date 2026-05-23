@@ -2608,7 +2608,6 @@ function renderStressTable() {
               <tr>
                 <th>Слово</th>
                 <th>Ударение</th>
-                <th>Подсказка</th>
               </tr>
             </thead>
             <tbody>
@@ -2625,10 +2624,15 @@ function renderStressRow(task) {
   return `
     <tr>
       <td>${escapeHtml(task.word)}</td>
-      <td><strong>${escapeHtml(formatStressedWord(task))}</strong></td>
-      <td>${escapeHtml(task.hint || "")}</td>
+      <td><strong>${escapeHtml(formatStressTableAccent(task))}</strong></td>
     </tr>
   `;
+}
+
+function formatStressTableAccent(task) {
+  const stressedWord = formatStressedWord(task);
+
+  return task.hint ? `${stressedWord} (${task.hint})` : stressedWord;
 }
 
 function formatStressedWord(task) {
