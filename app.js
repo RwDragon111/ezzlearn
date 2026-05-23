@@ -1879,10 +1879,7 @@ async function loginSupabaseUser(formData) {
     return;
   }
 
-  const { data, error } = await supabaseClient.auth.signInWithPassword({
-    email: usernameToSupabaseEmail(username),
-    password
-  });
+  const { data, error } = await signInWithUsername(username, password);
 
   if (error || !data?.user) {
     setProfileMessage("danger", "Логин или пароль не подошли.");
@@ -1907,8 +1904,8 @@ async function registerSupabaseUser(formData) {
     return;
   }
 
-  if (password.length < 4) {
-    setProfileMessage("danger", "Пароль должен быть не короче 4 символов.");
+  if (password.length < 6) {
+    setProfileMessage("danger", "Пароль должен быть не короче 6 символов.");
     return;
   }
 
@@ -1927,16 +1924,18 @@ async function registerSupabaseUser(formData) {
     }
   });
 
-  if (error || data?.user?.identities?.length === 0) {
-    setProfileMessage("danger", "Такой логин уже есть или Supabase не принял пароль.");
+  if (data?.user?.identities?.length === 0) {
+    setProfileMessage("danger", "Такой логин уже занят.");
+    return;
+  }
+
+  if (error) {
+    setProfileMessage("danger", getSupabaseAuthErrorText(error));
     return;
   }
 
   if (data?.user && !data?.session) {
-    const signIn = await supabaseClient.auth.signInWithPassword({
-      email: usernameToSupabaseEmail(username),
-      password
-    });
+    const signIn = await signInWithUsername(username, password);
 
     if (signIn.error || !signIn.data?.user) {
       setProfileMessage("success", "Профиль создан. Если вход не произошёл, отключи подтверждение email в Supabase Auth.");
@@ -1966,8 +1965,8 @@ async function changeSupabasePassword(formData) {
   const newPassword = String(formData.get("new-password") || "");
   const repeatPassword = String(formData.get("repeat-password") || "");
 
-  if (newPassword.length < 4) {
-    setProfileMessage("danger", "Новый пароль должен быть не короче 4 символов.");
+  if (newPassword.length < 6) {
+    setProfileMessage("danger", "Новый пароль должен быть не короче 6 символов.");
     return;
   }
 
@@ -1976,10 +1975,7 @@ async function changeSupabasePassword(formData) {
     return;
   }
 
-  const { error: signInError } = await supabaseClient.auth.signInWithPassword({
-    email: activeUser.email,
-    password: currentPassword
-  });
+  const { error: signInError } = await signInWithUsername(activeUser.username, currentPassword);
 
   if (signInError) {
     setProfileMessage("danger", "Старый пароль не подошёл.");
@@ -1994,6 +1990,22 @@ async function changeSupabasePassword(formData) {
   }
 
   setProfileMessage("success", "Пароль обновлён.");
+}
+
+async function signInWithUsername(username, password) {
+  const primary = await supabaseClient.auth.signInWithPassword({
+    email: usernameToSupabaseEmail(username),
+    password
+  });
+
+  if (!primary.error || primary.data?.user) {
+    return primary;
+  }
+
+  return supabaseClient.auth.signInWithPassword({
+    email: usernameToSupabaseLegacyEmail(username),
+    password
+  });
 }
 
 async function loadRemoteProgress(userId) {
@@ -2125,6 +2137,13 @@ function usernameToSupabaseEmail(username) {
   const userKey = normalizeUsernameKey(username);
   const bytes = new TextEncoder().encode(userKey);
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `u-${hex || "guest"}@users.ezzlearn.example.com`;
+}
+
+function usernameToSupabaseLegacyEmail(username) {
+  const userKey = normalizeUsernameKey(username);
+  const bytes = new TextEncoder().encode(userKey);
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return `u-${hex || "guest"}@ezzlearn.local`;
 }
 
@@ -2133,7 +2152,7 @@ function getSupabaseUsername(user) {
 }
 
 function supabaseEmailToUsername(email) {
-  const match = String(email || "").match(/^u-([0-9a-f]+)@ezzlearn\.local$/i);
+  const match = String(email || "").match(/^u-([0-9a-f]+)@(?:users\.ezzlearn\.example\.com|ezzlearn\.local)$/i);
 
   if (!match) {
     return "";
@@ -2146,6 +2165,24 @@ function supabaseEmailToUsername(email) {
   } catch {
     return "";
   }
+}
+
+function getSupabaseAuthErrorText(error) {
+  const message = String(error?.message || "").toLowerCase();
+
+  if (message.includes("password")) {
+    return "Пароль должен быть не короче 6 символов.";
+  }
+
+  if (message.includes("email")) {
+    return "Не получилось создать аккаунт с таким логином. Попробуй другой логин.";
+  }
+
+  if (message.includes("already") || message.includes("registered") || message.includes("exists")) {
+    return "Такой логин уже занят.";
+  }
+
+  return "Не получилось создать аккаунт. Попробуй другой логин или пароль.";
 }
 
 function normalizeRemoteStats(rows) {
