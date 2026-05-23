@@ -140,6 +140,12 @@ const customModes = [
 const customModeMap = new Map(customModes.map((mode) => [mode.id, mode]));
 const authUsersKey = "ezzlearn-users-v1";
 const authCurrentUserKey = "ezzlearn-current-user-v1";
+const supabaseUrl = "https://vwkcfetuuykxzzuncmcc.supabase.co";
+const supabasePublishableKey = "sb_publishable_7VjHTYBCslifxQvNsHSMkg_lr1jeIF2";
+const supabaseProgressTable = "user_progress";
+const supabaseClient = window.supabase?.createClient
+  ? window.supabase.createClient(supabaseUrl, supabasePublishableKey)
+  : null;
 
 const dom = {
   app: document.getElementById("app"),
@@ -167,11 +173,15 @@ const state = {
   stressSession: null,
   profileMode: "login",
   profileMessage: null,
+  remoteUser: null,
+  authReady: !supabaseClient,
+  authLoading: false,
   locked: false,
   timer: null
 };
 
 applyStoredTheme();
+initializeSupabaseAuth();
 updateProfileButton();
 render();
 
@@ -1113,6 +1123,9 @@ function renderSubjectCard(subject) {
 
 function renderProfile() {
   const activeUser = getActiveUser();
+  const profileText = supabaseClient
+    ? "Профиль синхронизируется через Supabase, поэтому прогресс будет доступен с телефона и компьютера."
+    : "Профиль хранится в этом браузере и помогает отмечать решённые задания.";
 
   dom.app.innerHTML = `
     <section class="game-panel profile-panel">
@@ -1121,7 +1134,7 @@ function renderProfile() {
           <div>
             <p class="kicker">Профиль</p>
             <h1 class="main-title">${activeUser ? escapeHtml(activeUser.username) : "Вход в аккаунт"}</h1>
-            <p class="screen-text">Профиль хранится в этом браузере и помогает отмечать решённые задания.</p>
+            <p class="screen-text">${state.authLoading ? "Проверяю вход..." : profileText}</p>
           </div>
         </div>
 
@@ -1657,6 +1670,65 @@ function isCurrentMathAnswerCorrect() {
   return Boolean(task && session && isMathAnswerCorrect(session.userAnswer, task.answer));
 }
 
+function initializeSupabaseAuth() {
+  if (!supabaseClient) {
+    return;
+  }
+
+  state.authLoading = true;
+  supabaseClient.auth.getSession()
+    .then(({ data }) => applySupabaseUser(data?.session?.user || null))
+    .catch((error) => {
+      console.warn("Supabase auth init failed", error);
+      state.authLoading = false;
+      state.authReady = true;
+      updateProfileButton();
+      render();
+    });
+
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    applySupabaseUser(session?.user || null);
+  });
+}
+
+async function applySupabaseUser(user, options = {}) {
+  const { renderAfter = true } = options;
+
+  if (!supabaseClient) {
+    return;
+  }
+
+  if (!user) {
+    state.remoteUser = null;
+    state.authLoading = false;
+    state.authReady = true;
+
+    if (renderAfter) {
+      updateProfileButton();
+      render();
+    }
+    return;
+  }
+
+  const stats = await loadRemoteProgress(user.id);
+
+  state.remoteUser = {
+    id: user.id,
+    key: user.id,
+    provider: "supabase",
+    email: user.email || "",
+    username: getSupabaseUsername(user),
+    stats
+  };
+  state.authLoading = false;
+  state.authReady = true;
+
+  if (renderAfter) {
+    updateProfileButton();
+    render();
+  }
+}
+
 async function handleAuthForm(form) {
   const formData = new FormData(form);
   const formType = form.dataset.authForm;
@@ -1677,6 +1749,11 @@ async function handleAuthForm(form) {
 }
 
 async function loginUser(formData) {
+  if (supabaseClient) {
+    await loginSupabaseUser(formData);
+    return;
+  }
+
   const username = String(formData.get("username") || "").trim();
   const password = String(formData.get("password") || "");
   const userKey = normalizeUsernameKey(username);
@@ -1696,6 +1773,11 @@ async function loginUser(formData) {
 }
 
 async function registerUser(formData) {
+  if (supabaseClient) {
+    await registerSupabaseUser(formData);
+    return;
+  }
+
   const username = String(formData.get("username") || "").trim();
   const password = String(formData.get("password") || "");
   const repeatPassword = String(formData.get("repeat-password") || "");
@@ -1737,6 +1819,11 @@ async function registerUser(formData) {
 }
 
 async function changeUserPassword(formData) {
+  if (supabaseClient) {
+    await changeSupabasePassword(formData);
+    return;
+  }
+
   const activeUser = getActiveUser();
 
   if (!activeUser) {
@@ -1768,12 +1855,192 @@ async function changeUserPassword(formData) {
   setProfileMessage("success", "Пароль обновлён.");
 }
 
-function logoutUser() {
+async function logoutUser() {
+  if (supabaseClient) {
+    await supabaseClient.auth.signOut();
+    state.remoteUser = null;
+    state.profileMode = "login";
+    setProfileMessage("success", "Ты вышел из профиля.");
+    updateProfileButton();
+    render();
+    return;
+  }
+
   localStorage.removeItem(authCurrentUserKey);
   state.profileMode = "login";
   setProfileMessage("success", "Ты вышел из профиля.");
   updateProfileButton();
   render();
+}
+
+async function loginSupabaseUser(formData) {
+  const username = String(formData.get("username") || "").trim();
+  const password = String(formData.get("password") || "");
+  const userKey = normalizeUsernameKey(username);
+
+  if (!userKey || !password) {
+    setProfileMessage("danger", "Введи логин и пароль.");
+    return;
+  }
+
+  const { data, error } = await supabaseClient.auth.signInWithPassword({
+    email: usernameToSupabaseEmail(username),
+    password
+  });
+
+  if (error || !data?.user) {
+    setProfileMessage("danger", "Логин или пароль не подошли.");
+    return;
+  }
+
+  await applySupabaseUser(data.user, { renderAfter: false });
+  state.profileMode = "account";
+  setProfileMessage("success", "Ты вошёл в профиль.");
+  updateProfileButton();
+  render();
+}
+
+async function registerSupabaseUser(formData) {
+  const username = String(formData.get("username") || "").trim();
+  const password = String(formData.get("password") || "");
+  const repeatPassword = String(formData.get("repeat-password") || "");
+  const userKey = normalizeUsernameKey(username);
+
+  if (userKey.length < 3) {
+    setProfileMessage("danger", "Логин должен быть не короче 3 символов.");
+    return;
+  }
+
+  if (password.length < 4) {
+    setProfileMessage("danger", "Пароль должен быть не короче 4 символов.");
+    return;
+  }
+
+  if (password !== repeatPassword) {
+    setProfileMessage("danger", "Пароли не совпали.");
+    return;
+  }
+
+  const { data, error } = await supabaseClient.auth.signUp({
+    email: usernameToSupabaseEmail(username),
+    password,
+    options: {
+      data: {
+        username
+      }
+    }
+  });
+
+  if (error || data?.user?.identities?.length === 0) {
+    setProfileMessage("danger", "Такой логин уже есть или Supabase не принял пароль.");
+    return;
+  }
+
+  if (data?.user && !data?.session) {
+    const signIn = await supabaseClient.auth.signInWithPassword({
+      email: usernameToSupabaseEmail(username),
+      password
+    });
+
+    if (signIn.error || !signIn.data?.user) {
+      setProfileMessage("success", "Профиль создан. Если вход не произошёл, отключи подтверждение email в Supabase Auth.");
+      return;
+    }
+
+    await applySupabaseUser(signIn.data.user, { renderAfter: false });
+  } else if (data?.user) {
+    await applySupabaseUser(data.user, { renderAfter: false });
+  }
+
+  state.profileMode = "account";
+  setProfileMessage("success", "Профиль создан.");
+  updateProfileButton();
+  render();
+}
+
+async function changeSupabasePassword(formData) {
+  const activeUser = getActiveUser();
+
+  if (!activeUser) {
+    openProfile();
+    return;
+  }
+
+  const currentPassword = String(formData.get("current-password") || "");
+  const newPassword = String(formData.get("new-password") || "");
+  const repeatPassword = String(formData.get("repeat-password") || "");
+
+  if (newPassword.length < 4) {
+    setProfileMessage("danger", "Новый пароль должен быть не короче 4 символов.");
+    return;
+  }
+
+  if (newPassword !== repeatPassword) {
+    setProfileMessage("danger", "Новые пароли не совпали.");
+    return;
+  }
+
+  const { error: signInError } = await supabaseClient.auth.signInWithPassword({
+    email: activeUser.email,
+    password: currentPassword
+  });
+
+  if (signInError) {
+    setProfileMessage("danger", "Старый пароль не подошёл.");
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+
+  if (error) {
+    setProfileMessage("danger", "Не получилось поменять пароль. Попробуй ещё раз.");
+    return;
+  }
+
+  setProfileMessage("success", "Пароль обновлён.");
+}
+
+async function loadRemoteProgress(userId) {
+  try {
+    const { data, error } = await supabaseClient
+      .from(supabaseProgressTable)
+      .select("subject, task_id, task_number, display_number, title, solved_at")
+      .eq("user_id", userId);
+
+    if (error) {
+      console.warn("Supabase progress load failed", error);
+      return createEmptyStats();
+    }
+
+    return normalizeRemoteStats(data || []);
+  } catch (error) {
+    console.warn("Supabase progress load failed", error);
+    return createEmptyStats();
+  }
+}
+
+async function syncSolvedTaskToSupabase(subject, entry) {
+  if (!supabaseClient || !state.remoteUser?.id || !entry?.id) {
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from(supabaseProgressTable)
+    .upsert({
+      user_id: state.remoteUser.id,
+      subject,
+      task_id: String(entry.id),
+      task_number: entry.number === null || entry.number === undefined ? null : String(entry.number),
+      display_number: entry.displayNumber === null || entry.displayNumber === undefined ? null : String(entry.displayNumber),
+      title: entry.title || "Задание",
+      solved_at: entry.solvedAt || new Date().toISOString()
+    }, {
+      onConflict: "user_id,subject,task_id"
+    });
+
+  if (error) {
+    console.warn("Supabase progress sync failed", error);
+  }
 }
 
 function setProfileMessage(type, text) {
@@ -1794,6 +2061,15 @@ function saveUsers(users) {
 }
 
 function getActiveUser() {
+  if (state.remoteUser) {
+    state.remoteUser.stats = normalizeUserStats(state.remoteUser.stats);
+    return state.remoteUser;
+  }
+
+  if (supabaseClient) {
+    return null;
+  }
+
   const userKey = localStorage.getItem(authCurrentUserKey);
 
   if (!userKey) {
@@ -1813,6 +2089,15 @@ function getActiveUser() {
 }
 
 function saveActiveUser(user) {
+  if (user?.provider === "supabase") {
+    state.remoteUser = {
+      ...state.remoteUser,
+      ...user,
+      stats: normalizeUserStats(user.stats)
+    };
+    return;
+  }
+
   const users = loadUsers();
   const userKey = user.key || normalizeUsernameKey(user.username);
   const { key, ...storedUser } = user;
@@ -1838,6 +2123,59 @@ function createEmptyStats() {
 
 function normalizeUsernameKey(username) {
   return String(username || "").trim().toLowerCase();
+}
+
+function usernameToSupabaseEmail(username) {
+  const userKey = normalizeUsernameKey(username);
+  const bytes = new TextEncoder().encode(userKey);
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `u-${hex || "guest"}@ezzlearn.local`;
+}
+
+function getSupabaseUsername(user) {
+  return user?.user_metadata?.username || supabaseEmailToUsername(user?.email) || "Профиль";
+}
+
+function supabaseEmailToUsername(email) {
+  const match = String(email || "").match(/^u-([0-9a-f]+)@ezzlearn\.local$/i);
+
+  if (!match) {
+    return "";
+  }
+
+  const bytes = match[1].match(/.{1,2}/g)?.map((value) => parseInt(value, 16)) || [];
+
+  try {
+    return new TextDecoder().decode(new Uint8Array(bytes));
+  } catch {
+    return "";
+  }
+}
+
+function normalizeRemoteStats(rows) {
+  const stats = createEmptyStats();
+
+  rows.forEach((row) => {
+    const subject = row.subject;
+
+    if (!subject) {
+      return;
+    }
+
+    if (!stats[subject]) {
+      stats[subject] = {};
+    }
+
+    stats[subject][row.task_id] = {
+      id: row.task_id,
+      number: row.task_number || null,
+      displayNumber: row.display_number || row.task_number || null,
+      title: row.title || "Задание",
+      solvedAt: row.solved_at || new Date().toISOString()
+    };
+  });
+
+  return normalizeUserStats(stats);
 }
 
 async function hashPassword(userKey, password) {
@@ -1878,6 +2216,7 @@ function recordSolvedTask(subject, task) {
   stats[subject] = bucket;
   activeUser.stats = stats;
   saveActiveUser(activeUser);
+  syncSolvedTaskToSupabase(subject, bucket[task.id]);
   updateProfileButton();
 }
 
@@ -3503,6 +3842,13 @@ function updateProfileButton() {
   const activeUser = getActiveUser();
   const avatar = dom.profileButton.querySelector(".profile-avatar");
   const name = dom.profileButton.querySelector(".profile-name");
+
+  if (state.authLoading) {
+    avatar.textContent = "...";
+    name.textContent = "Вход...";
+    dom.profileButton.classList.remove("is-active");
+    return;
+  }
 
   if (activeUser) {
     const label = activeUser.username || "Профиль";
