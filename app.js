@@ -141,18 +141,11 @@ const customModeMap = new Map(customModes.map((mode) => [mode.id, mode]));
 const authUsersKey = "ezzlearn-users-v1";
 const authCurrentUserKey = "ezzlearn-current-user-v1";
 const authRemoteProfileKey = "ezzlearn-remote-profile-v1";
+const supabaseSessionKey = "ezzlearn-supabase-session-v1";
 const supabaseUrl = "https://vwkcfetuuykxzzuncmcc.supabase.co";
 const supabasePublishableKey = "sb_publishable_7VjHTYBCslifxQvNsHSMkg_lr1jeIF2";
 const supabaseProgressTable = "user_progress";
-const supabaseClient = window.supabase?.createClient
-  ? window.supabase.createClient(supabaseUrl, supabasePublishableKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: false
-      }
-    })
-  : null;
+const supabaseClient = createSupabaseService(supabaseUrl, supabasePublishableKey);
 const leaderboardSubjects = [
   { id: "math", title: "Математика" },
   { id: "physics", title: "Физика" }
@@ -1802,21 +1795,250 @@ function isCurrentMathAnswerCorrect() {
   return Boolean(task && session && isMathAnswerCorrect(session.userAnswer, task.answer));
 }
 
+function createSupabaseService(projectUrl, publishableKey) {
+  const listeners = new Set();
+
+  function notifyAuth(event, session) {
+    listeners.forEach((listener) => listener(event, session));
+  }
+
+  function getStoredSession() {
+    try {
+      const session = JSON.parse(localStorage.getItem(supabaseSessionKey));
+      return session?.access_token && session?.user ? session : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveSession(payload) {
+    if (!payload?.access_token || !payload?.user) {
+      return null;
+    }
+
+    const session = {
+      access_token: payload.access_token,
+      refresh_token: payload.refresh_token || "",
+      token_type: payload.token_type || "bearer",
+      expires_at: payload.expires_at || Math.floor(Date.now() / 1000) + Number(payload.expires_in || 3600),
+      user: payload.user
+    };
+
+    localStorage.setItem(supabaseSessionKey, JSON.stringify(session));
+    return session;
+  }
+
+  function clearSession() {
+    localStorage.removeItem(supabaseSessionKey);
+    localStorage.removeItem(authRemoteProfileKey);
+  }
+
+  async function authRequest(path, body, options = {}) {
+    const headers = {
+      apikey: publishableKey,
+      Authorization: `Bearer ${options.token || publishableKey}`,
+      "Content-Type": "application/json",
+    };
+    const response = await fetch(`${projectUrl}${path}`, {
+      method: options.method || "POST",
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+
+    if (!response.ok) {
+      return { data: null, error: normalizeSupabaseRestError(response, payload) };
+    }
+
+    return { data: payload, error: null };
+  }
+
+  async function refreshStoredSession(session) {
+    if (!session?.refresh_token) {
+      clearSession();
+      return { data: { session: null }, error: null };
+    }
+
+    const { data, error } = await authRequest("/auth/v1/token?grant_type=refresh_token", {
+      refresh_token: session.refresh_token
+    });
+
+    if (error || !data?.access_token) {
+      clearSession();
+      return { data: { session: null }, error };
+    }
+
+    const nextSession = saveSession(data);
+    return { data: { session: nextSession }, error: null };
+  }
+
+  async function restRequest(path, options = {}) {
+    const session = getStoredSession();
+    const headers = {
+      apikey: publishableKey,
+      Authorization: `Bearer ${session?.access_token || publishableKey}`,
+      ...(options.headers || {})
+    };
+
+    if (options.body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    const response = await fetch(`${projectUrl}${path}`, {
+      method: options.method || "GET",
+      headers,
+      body: options.body
+    });
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+
+    if (!response.ok) {
+      return { data: null, error: normalizeSupabaseRestError(response, payload) };
+    }
+
+    return { data: payload, error: null };
+  }
+
+  return {
+    auth: {
+      async getSession() {
+        const session = getStoredSession();
+
+        if (!session) {
+          return { data: { session: null }, error: null };
+        }
+
+        if (session.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
+          return refreshStoredSession(session);
+        }
+
+        return { data: { session }, error: null };
+      },
+      onAuthStateChange(listener) {
+        listeners.add(listener);
+        return {
+          data: {
+            subscription: {
+              unsubscribe: () => listeners.delete(listener)
+            }
+          }
+        };
+      },
+      async signInWithPassword({ email, password }) {
+        const { data, error } = await authRequest("/auth/v1/token?grant_type=password", { email, password });
+
+        if (error || !data?.user) {
+          return { data: null, error };
+        }
+
+        const session = saveSession(data);
+        notifyAuth("SIGNED_IN", session);
+        return { data: { user: data.user, session }, error: null };
+      },
+      async signUp({ email, password, options }) {
+        const { data, error } = await authRequest("/auth/v1/signup", {
+          email,
+          password,
+          data: options?.data || {}
+        });
+
+        if (error || !data?.user) {
+          return { data: null, error };
+        }
+
+        const session = data.access_token ? saveSession(data) : null;
+
+        if (session) {
+          notifyAuth("SIGNED_IN", session);
+        }
+
+        return { data: { user: data.user, session }, error: null };
+      },
+      async signOut() {
+        const session = getStoredSession();
+
+        if (session?.access_token) {
+          await authRequest("/auth/v1/logout", null, { token: session.access_token });
+        }
+
+        clearSession();
+        notifyAuth("SIGNED_OUT", null);
+        return { error: null };
+      },
+      async updateUser(update) {
+        const session = getStoredSession();
+
+        if (!session?.access_token) {
+          return { data: null, error: { message: "Not signed in" } };
+        }
+
+        const { data, error } = await authRequest("/auth/v1/user", update, {
+          method: "PUT",
+          token: session.access_token
+        });
+
+        if (error) {
+          return { data: null, error };
+        }
+
+        const user = data?.user || data;
+        const nextSession = {
+          ...session,
+          user
+        };
+        localStorage.setItem(supabaseSessionKey, JSON.stringify(nextSession));
+        notifyAuth("USER_UPDATED", nextSession);
+        return { data: { user }, error: null };
+      }
+    },
+    from(table) {
+      return {
+        select(columns) {
+          const params = new URLSearchParams({ select: columns });
+
+          return {
+            eq(column, value) {
+              params.set(column, `eq.${value}`);
+              return restRequest(`/rest/v1/${encodeURIComponent(table)}?${params.toString()}`);
+            }
+          };
+        },
+        upsert(row, options = {}) {
+          const params = new URLSearchParams();
+
+          if (options.onConflict) {
+            params.set("on_conflict", options.onConflict);
+          }
+
+          const query = params.toString() ? `?${params.toString()}` : "";
+          return restRequest(`/rest/v1/${encodeURIComponent(table)}${query}`, {
+            method: "POST",
+            headers: {
+              Prefer: "resolution=merge-duplicates,return=minimal"
+            },
+            body: JSON.stringify(row)
+          });
+        }
+      };
+    }
+  };
+}
+
+function normalizeSupabaseRestError(response, payload) {
+  return {
+    status: response.status,
+    message: payload?.msg || payload?.message || payload?.error_description || response.statusText || "Supabase request failed",
+    details: payload
+  };
+}
+
 function initializeSupabaseAuth() {
   if (!supabaseClient) {
     return;
   }
 
-  const cachedProfile = loadCachedRemoteProfile();
-
-  if (cachedProfile) {
-    state.remoteUser = cachedProfile;
-    state.authReady = true;
-    state.authLoading = false;
-  } else {
-    state.authLoading = true;
-  }
-
+  state.authLoading = true;
   supabaseClient.auth.getSession()
     .then(({ data }) => applySupabaseUser(data?.session?.user || null))
     .catch((error) => {
