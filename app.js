@@ -1123,9 +1123,6 @@ function renderSubjectCard(subject) {
 
 function renderProfile() {
   const activeUser = getActiveUser();
-  const profileText = supabaseClient
-    ? "Профиль синхронизируется через Supabase, поэтому прогресс будет доступен с телефона и компьютера."
-    : "Профиль хранится в этом браузере и помогает отмечать решённые задания.";
 
   dom.app.innerHTML = `
     <section class="game-panel profile-panel">
@@ -1134,7 +1131,6 @@ function renderProfile() {
           <div>
             <p class="kicker">Профиль</p>
             <h1 class="main-title">${activeUser ? escapeHtml(activeUser.username) : "Вход в аккаунт"}</h1>
-            <p class="screen-text">${state.authLoading ? "Проверяю вход..." : profileText}</p>
           </div>
         </div>
 
