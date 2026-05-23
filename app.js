@@ -1256,11 +1256,9 @@ function renderLeaderboardRows(rows) {
           <div class="leaderboard-place">${index + 1}</div>
           <div class="leaderboard-user">
             <strong>${escapeHtml(row.username)}</strong>
-            <span>${escapeHtml(formatLeaderboardLastSolved(row.lastSolvedAt))}</span>
           </div>
           <div class="leaderboard-score">
-            <strong>${row.count}</strong>
-            <span>${formatTaskCount(row.count)}</span>
+            <strong>${formatTaskCount(row.count)}</strong>
           </div>
         </article>
       `).join("")}
@@ -2536,10 +2534,6 @@ function getLeaderboardUsername(row) {
   }
 
   return "Игрок";
-}
-
-function formatLeaderboardLastSolved(value) {
-  return value ? `последнее: ${formatSolvedDate(value)}` : "";
 }
 
 function buildPhysicsRound(entry) {

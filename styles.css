@@ -1047,7 +1047,7 @@ body.dark .selection-counter {
 
 .leaderboard-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr minmax(130px, auto);
   align-items: center;
   gap: 14px;
   padding: 14px 16px;
@@ -1079,6 +1079,12 @@ body.dark .selection-counter {
   color: var(--ink);
 }
 
+.leaderboard-user strong {
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .leaderboard-user span,
 .leaderboard-score span {
   color: var(--muted);
@@ -1088,8 +1094,9 @@ body.dark .selection-counter {
 
 .leaderboard-score {
   display: grid;
-  justify-items: end;
+  justify-items: center;
   gap: 3px;
+  text-align: center;
 }
 
 .math-task-card {
@@ -1533,6 +1540,7 @@ body.dark .math-task-text img.math {
   .leaderboard-score {
     grid-column: 2;
     justify-items: start;
+    text-align: left;
   }
 
   .progress-track,
