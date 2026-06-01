@@ -43,9 +43,13 @@ const stressTasks = (window.STRESS_TASKS || []).filter(
   (task) => task?.word && Number.isInteger(task.stressIndex)
 );
 const introWordsData = window.INTRO_WORDS_GAME || {};
-const introductoryWords = uniqueWords(
-  (introWordsData.introductoryGroups || []).flatMap((group) => group.words || [])
-);
+const introWordGroups = (introWordsData.introductoryGroups || [])
+  .map((group, index) => ({
+    title: group.title || `Раздел ${index + 1}`,
+    words: uniqueWords(group.words || [])
+  }))
+  .filter((group) => group.words.length > 0);
+const introductoryWords = uniqueWords(introWordGroups.flatMap((group) => group.words));
 const falseIntroductoryWords = uniqueWords(introWordsData.falseIntroductoryWords || []);
 const introWordRequiredCorrect = 2;
 const introWordRepeatGap = 10;
@@ -294,6 +298,13 @@ document.addEventListener("click", (event) => {
       render();
       break;
     case "close-stresses":
+      openRussian();
+      break;
+    case "show-intro-words":
+      state.route = "russian-intro-words";
+      render();
+      break;
+    case "close-intro-words":
       openRussian();
       break;
     case "spelling-answer":
@@ -1063,8 +1074,7 @@ function handleIntroWordAnswer(answer) {
     target.dueAt = session.roundsPlayed + introWordMistakeGap + 1;
     session.feedback = {
       correct: false,
-      answer: round.answer,
-      message: `Это не вводное: «${round.answer}». Счётчик слова сброшен.`
+      answer: round.answer
     };
 
     lockAndAdvance(() => {
@@ -1080,15 +1090,13 @@ function handleIntroWordAnswer(answer) {
     session.completed += 1;
     session.feedback = {
       correct: true,
-      answer: round.answer,
-      message: `«${round.answer}» закреплено.`
+      answer: round.answer
     };
   } else {
     target.dueAt = session.roundsPlayed + introWordRepeatGap + 1;
     session.feedback = {
       correct: true,
-      answer: round.answer,
-      message: `Верно. «${round.answer}» вернётся позже для второго ответа.`
+      answer: round.answer
     };
   }
 
@@ -1286,6 +1294,11 @@ function render() {
 
   if (state.route === "russian-stresses") {
     renderStressTable();
+    return;
+  }
+
+  if (state.route === "russian-intro-words") {
+    renderIntroWordsTable();
     return;
   }
 
@@ -1622,8 +1635,8 @@ function renderRussianIntro() {
         <h1 class="main-title">Исключения</h1>
       </div>
       <div class="start-actions">
-        <button class="action-button primary" data-action="start-game">Начать игру</button>
         <button class="action-button secondary" data-action="configure-game">Настроить игру</button>
+        <button class="action-button primary" data-action="start-game">Начать игру</button>
       </div>
     </section>
 
@@ -1651,6 +1664,7 @@ function renderRussianIntro() {
       <div class="start-actions">
         <button class="action-button secondary" data-action="show-exceptions">Показать все исключения</button>
         <button class="action-button secondary" data-action="show-stresses">Показать все ударения</button>
+        <button class="action-button secondary" data-action="show-intro-words">Показать все вводные слова</button>
       </div>
     </section>
   `;
@@ -3805,6 +3819,48 @@ function renderStressTable() {
   `;
 }
 
+function renderIntroWordsTable() {
+  dom.app.innerHTML = `
+    <section class="table-panel">
+      <div class="screen">
+        <div class="screen-head">
+          <div>
+            <p class="kicker">Русский язык</p>
+            <h1 class="main-title">Вводные и не вводные слова</h1>
+          </div>
+          <button class="close-button" type="button" data-action="close-intro-words" aria-label="Закрыть таблицу">×</button>
+        </div>
+        <div class="exceptions-table-wrap">
+          <table class="exceptions-table">
+            <thead>
+              <tr>
+                <th>Раздел</th>
+                <th>Слова и сочетания</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${introWordGroups.map(renderIntroWordGroupRow).join("")}
+              <tr>
+                <td><strong>Не являются вводными</strong></td>
+                <td>${escapeHtml(falseIntroductoryWords.length ? falseIntroductoryWords.join(", ") : "нет")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderIntroWordGroupRow(group) {
+  return `
+    <tr>
+      <td>${escapeHtml(group.title)}</td>
+      <td>${escapeHtml(group.words.join(", "))}</td>
+    </tr>
+  `;
+}
+
 function renderStressRow(task) {
   return `
     <tr>
@@ -4255,13 +4311,10 @@ function renderIntroWordsGame() {
   dom.app.innerHTML = `
     <section class="game-panel">
       <div class="screen intro-word-screen">
-        ${renderIntroWordsProgress(session)}
-
         <div class="screen-head">
           <div>
             <div class="stage-badge">Вводное слово или нет</div>
             <h2 class="screen-title">Какое слово не является вводным?</h2>
-            <p class="mini-meta">Выбери один вариант из четырёх.</p>
           </div>
           <div class="mistake-counter">Ошибок: ${session.mistakes}</div>
         </div>
@@ -4280,37 +4333,8 @@ function renderIntroWordsGame() {
             )
             .join("")}
         </div>
-
-        ${session.feedback ? `<p class="feedback-note ${session.feedback.correct ? "success" : "danger"}">${escapeHtml(session.feedback.message)}</p>` : ""}
       </div>
     </section>
-  `;
-}
-
-function renderIntroWordsProgress(session) {
-  const total = session.cards.length;
-  const remaining = total - session.completed;
-  const inSecondPass = session.cards.filter((card) => !card.retired && card.correctCount > 0).length;
-
-  return `
-    <div class="intro-word-stats">
-      <div>
-        <span>Закреплено</span>
-        <strong>${session.completed} / ${total}</strong>
-      </div>
-      <div>
-        <span>Осталось</span>
-        <strong>${remaining}</strong>
-      </div>
-      <div>
-        <span>Ждут повтора</span>
-        <strong>${inSecondPass}</strong>
-      </div>
-      <div>
-        <span>Раундов</span>
-        <strong>${session.roundsPlayed + 1}</strong>
-      </div>
-    </div>
   `;
 }
 

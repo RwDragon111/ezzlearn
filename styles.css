@@ -93,7 +93,7 @@ a,
 .app-shell {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 36px 0 52px;
+  padding: 92px 0 52px;
 }
 
 .top-controls {
@@ -110,9 +110,9 @@ a,
   z-index: 20;
   top: 18px;
   left: 18px;
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 10px;
-  justify-items: start;
 }
 
 .icon-button,
@@ -558,37 +558,6 @@ body.dark .selection-counter {
   border: 1px solid var(--line);
   color: var(--muted);
   font-weight: 800;
-}
-
-.intro-word-screen {
-  gap: 24px;
-}
-
-.intro-word-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.intro-word-stats div {
-  display: grid;
-  gap: 5px;
-  min-height: 72px;
-  padding: 13px 15px;
-  border-radius: var(--radius-md);
-  background: var(--surface-strong);
-  border: 1px solid var(--line);
-}
-
-.intro-word-stats span {
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 800;
-}
-
-.intro-word-stats strong {
-  color: var(--ink);
-  font-size: 1.25rem;
 }
 
 .choice-grid.intro-word-options {
@@ -1533,7 +1502,7 @@ body.dark .math-task-text img.math {
 @media (max-width: 720px) {
   .app-shell {
     width: min(100% - 20px, 1180px);
-    padding: 22px 0 80px;
+    padding: 74px 0 80px;
   }
 
   .hero-panel,
@@ -1551,6 +1520,7 @@ body.dark .math-task-text img.math {
   .profile-control {
     top: 10px;
     left: 10px;
+    gap: 8px;
   }
 
   .profile-name {
@@ -1579,8 +1549,7 @@ body.dark .math-task-text img.math {
 
   .progress-track,
   .choice-grid.two-up,
-  .choice-grid.intro-word-options,
-  .intro-word-stats {
+  .choice-grid.intro-word-options {
     grid-template-columns: 1fr;
   }
 
