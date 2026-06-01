@@ -42,6 +42,14 @@ const spellingDeck = spellingTasks
 const stressTasks = (window.STRESS_TASKS || []).filter(
   (task) => task?.word && Number.isInteger(task.stressIndex)
 );
+const introWordsData = window.INTRO_WORDS_GAME || {};
+const introductoryWords = uniqueWords(
+  (introWordsData.introductoryGroups || []).flatMap((group) => group.words || [])
+);
+const falseIntroductoryWords = uniqueWords(introWordsData.falseIntroductoryWords || []);
+const introWordRequiredCorrect = 2;
+const introWordRepeatGap = 10;
+const introWordMistakeGap = 4;
 const physicsSections = window.PHYSICS_SECTIONS || [];
 const physicsFormulas = physicsSections.flatMap((section) =>
   section.formulas.map((formula) => ({
@@ -175,6 +183,7 @@ const state = {
   physicsProblemSession: null,
   mathSession: null,
   stressSession: null,
+  introWordsSession: null,
   profileMode: "login",
   profileMessage: null,
   remoteUser: null,
@@ -250,6 +259,9 @@ document.addEventListener("click", (event) => {
     case "start-stress-game":
       startStressGame();
       break;
+    case "start-intro-words-game":
+      startIntroWordsGame();
+      break;
     case "configure-game":
       openConfigurator();
       break;
@@ -316,6 +328,12 @@ document.addEventListener("click", (event) => {
       break;
     case "stress-play-again":
       startStressGame();
+      break;
+    case "intro-word-answer":
+      handleIntroWordAnswer(value);
+      break;
+    case "intro-word-play-again":
+      startIntroWordsGame();
       break;
     case "toggle-custom-risky":
       toggleCustomRiskySelection(value);
@@ -507,6 +525,7 @@ function goHome() {
   state.physicsProblemSession = null;
   state.mathSession = null;
   state.stressSession = null;
+  state.introWordsSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -523,6 +542,7 @@ function openRussian() {
   state.physicsProblemSession = null;
   state.mathSession = null;
   state.stressSession = null;
+  state.introWordsSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -539,6 +559,7 @@ function openPhysics() {
   state.physicsProblemSession = null;
   state.mathSession = null;
   state.stressSession = null;
+  state.introWordsSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -555,6 +576,7 @@ function openMath() {
   state.physicsProblemSession = null;
   state.mathSession = null;
   state.stressSession = null;
+  state.introWordsSession = null;
   state.mistakes = 0;
   state.locked = false;
   render();
@@ -609,6 +631,7 @@ function openPlaceholder(subjectId) {
   state.physicsProblemSession = null;
   state.mathSession = null;
   state.stressSession = null;
+  state.introWordsSession = null;
   render();
 }
 
@@ -616,6 +639,7 @@ function startGame() {
   clearPendingTimer();
   state.customSession = null;
   state.stressSession = null;
+  state.introWordsSession = null;
 
   if ((exceptionDeck.length === 0 && riskyDeck.length === 0) || spellingDeck.length === 0) {
     state.route = "russian-game";
@@ -666,6 +690,7 @@ function startStressGame() {
     state.subjectId = "russian";
     state.screen = "empty";
     state.stressSession = null;
+    state.introWordsSession = null;
     render();
     return;
   }
@@ -678,6 +703,7 @@ function startStressGame() {
   state.physicsSession = null;
   state.physicsProblemSession = null;
   state.mathSession = null;
+  state.introWordsSession = null;
   state.stressSession = {
     tasks: shuffleWords(stressTasks),
     index: 0,
@@ -690,6 +716,46 @@ function startStressGame() {
   render();
 }
 
+function startIntroWordsGame() {
+  clearPendingTimer();
+
+  if (falseIntroductoryWords.length === 0 || introductoryWords.length < 3) {
+    state.route = "russian-game";
+    state.subjectId = "russian";
+    state.screen = "empty";
+    state.introWordsSession = null;
+    render();
+    return;
+  }
+
+  state.route = "russian-game";
+  state.subjectId = "russian";
+  state.screen = "intro-word-game";
+  state.session = null;
+  state.customSession = null;
+  state.physicsSession = null;
+  state.physicsProblemSession = null;
+  state.mathSession = null;
+  state.stressSession = null;
+  state.introWordsSession = {
+    cards: shuffleWords(falseIntroductoryWords).map((word) => ({
+      word,
+      correctCount: 0,
+      dueAt: 0,
+      retired: false
+    })),
+    current: null,
+    choice: null,
+    feedback: null,
+    completed: 0,
+    mistakes: 0,
+    roundsPlayed: 0
+  };
+  state.locked = false;
+  prepareNextIntroWordRound();
+  render();
+}
+
 function openConfigurator() {
   clearPendingTimer();
   state.route = "russian-game";
@@ -698,6 +764,7 @@ function openConfigurator() {
   state.session = null;
   state.customSession = null;
   state.stressSession = null;
+  state.introWordsSession = null;
   state.physicsSession = null;
   state.locked = false;
   state.config.count = clampCount(state.config.count);
@@ -725,6 +792,7 @@ function startCustomPractice() {
   state.session = null;
   state.physicsSession = null;
   state.stressSession = null;
+  state.introWordsSession = null;
   state.customSession = {
     mode,
     count,
@@ -975,6 +1043,136 @@ function advanceStressGame() {
   session.index += 1;
   session.wrongIndices = new Set();
   session.correctIndex = null;
+}
+
+function handleIntroWordAnswer(answer) {
+  const session = state.introWordsSession;
+  const round = session?.current;
+
+  if (!session || !round) {
+    return;
+  }
+
+  const correct = normalizeWord(answer) === normalizeWord(round.answer);
+  const target = round.target;
+  session.choice = answer;
+
+  if (!correct) {
+    session.mistakes += 1;
+    target.correctCount = 0;
+    target.dueAt = session.roundsPlayed + introWordMistakeGap + 1;
+    session.feedback = {
+      correct: false,
+      answer: round.answer,
+      message: `Это не вводное: «${round.answer}». Счётчик слова сброшен.`
+    };
+
+    lockAndAdvance(() => {
+      advanceIntroWordsGame();
+    }, 1100);
+    return;
+  }
+
+  target.correctCount += 1;
+
+  if (target.correctCount >= introWordRequiredCorrect) {
+    target.retired = true;
+    session.completed += 1;
+    session.feedback = {
+      correct: true,
+      answer: round.answer,
+      message: `«${round.answer}» закреплено.`
+    };
+  } else {
+    target.dueAt = session.roundsPlayed + introWordRepeatGap + 1;
+    session.feedback = {
+      correct: true,
+      answer: round.answer,
+      message: `Верно. «${round.answer}» вернётся позже для второго ответа.`
+    };
+  }
+
+  lockAndAdvance(() => {
+    advanceIntroWordsGame();
+  }, 750);
+}
+
+function advanceIntroWordsGame() {
+  const session = state.introWordsSession;
+
+  if (!session) {
+    openRussian();
+    return;
+  }
+
+  session.roundsPlayed += 1;
+
+  if (session.completed >= session.cards.length) {
+    state.screen = "intro-word-finish";
+    session.current = null;
+    session.choice = null;
+    session.feedback = null;
+    return;
+  }
+
+  prepareNextIntroWordRound();
+}
+
+function prepareNextIntroWordRound() {
+  const session = state.introWordsSession;
+
+  if (!session) {
+    return;
+  }
+
+  const target = pickIntroWordTarget(session);
+
+  if (!target) {
+    state.screen = "intro-word-finish";
+    return;
+  }
+
+  session.current = buildIntroWordRound(target);
+  session.choice = null;
+  session.feedback = null;
+}
+
+function pickIntroWordTarget(session) {
+  const activeCards = session.cards.filter((card) => !card.retired);
+
+  if (activeCards.length === 0) {
+    return null;
+  }
+
+  const dueCards = activeCards.filter((card) => card.dueAt <= session.roundsPlayed);
+  const basePool = dueCards.length > 0 ? dueCards : getSoonestIntroWordCards(activeCards);
+  const previousWord = session.current?.target?.word;
+  const pool =
+    basePool.length > 1
+      ? basePool.filter((card) => normalizeWord(card.word) !== normalizeWord(previousWord))
+      : basePool;
+
+  return sample(pool.length > 0 ? pool : basePool);
+}
+
+function getSoonestIntroWordCards(cards) {
+  const nearestDueAt = Math.min(...cards.map((card) => card.dueAt));
+
+  return cards.filter((card) => card.dueAt === nearestDueAt);
+}
+
+function buildIntroWordRound(target) {
+  const normalizedTarget = normalizeWord(target.word);
+  const distractors = pickMany(
+    introductoryWords.filter((word) => normalizeWord(word) !== normalizedTarget),
+    3
+  );
+
+  return {
+    target,
+    answer: target.word,
+    options: shuffleWords([target.word, ...distractors])
+  };
 }
 
 function toggleCustomRiskySelection(word) {
@@ -1436,6 +1634,16 @@ function renderRussianIntro() {
       </div>
       <div class="start-actions">
         <button class="action-button primary" data-action="start-stress-game" ${stressTasks.length === 0 ? "disabled" : ""}>Начать игру</button>
+      </div>
+    </section>
+
+    <section class="hero-panel russian-start intro-words-start-panel">
+      <div>
+        <p class="kicker">Русский язык · вводные слова</p>
+        <h1 class="main-title">Вводное слово или нет</h1>
+      </div>
+      <div class="start-actions">
+        <button class="action-button primary" data-action="start-intro-words-game" ${falseIntroductoryWords.length === 0 ? "disabled" : ""}>Начать игру</button>
       </div>
     </section>
 
@@ -3638,6 +3846,12 @@ function renderRussianGame() {
     case "stress-finish":
       renderStressFinish();
       break;
+    case "intro-word-game":
+      renderIntroWordsGame();
+      break;
+    case "intro-word-finish":
+      renderIntroWordsFinish();
+      break;
     case "letter-pick":
       renderLetterPick();
       break;
@@ -4027,6 +4241,122 @@ function renderStressFinish() {
       </div>
     </section>
   `;
+}
+
+function renderIntroWordsGame() {
+  const session = state.introWordsSession;
+  const round = session?.current;
+
+  if (!session || !round) {
+    renderRussianIntro();
+    return;
+  }
+
+  dom.app.innerHTML = `
+    <section class="game-panel">
+      <div class="screen intro-word-screen">
+        ${renderIntroWordsProgress(session)}
+
+        <div class="screen-head">
+          <div>
+            <div class="stage-badge">Вводное слово или нет</div>
+            <h2 class="screen-title">Какое слово не является вводным?</h2>
+            <p class="mini-meta">Выбери один вариант из четырёх.</p>
+          </div>
+          <div class="mistake-counter">Ошибок: ${session.mistakes}</div>
+        </div>
+
+        <div class="choice-grid intro-word-options">
+          ${round.options
+            .map((word) =>
+              renderChoiceButton({
+                action: "intro-word-answer",
+                value: word,
+                label: word,
+                stateClass: getIntroWordChoiceState(word),
+                compact: true,
+                disabled: state.locked
+              })
+            )
+            .join("")}
+        </div>
+
+        ${session.feedback ? `<p class="feedback-note ${session.feedback.correct ? "success" : "danger"}">${escapeHtml(session.feedback.message)}</p>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function renderIntroWordsProgress(session) {
+  const total = session.cards.length;
+  const remaining = total - session.completed;
+  const inSecondPass = session.cards.filter((card) => !card.retired && card.correctCount > 0).length;
+
+  return `
+    <div class="intro-word-stats">
+      <div>
+        <span>Закреплено</span>
+        <strong>${session.completed} / ${total}</strong>
+      </div>
+      <div>
+        <span>Осталось</span>
+        <strong>${remaining}</strong>
+      </div>
+      <div>
+        <span>Ждут повтора</span>
+        <strong>${inSecondPass}</strong>
+      </div>
+      <div>
+        <span>Раундов</span>
+        <strong>${session.roundsPlayed + 1}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderIntroWordsFinish() {
+  const session = state.introWordsSession;
+
+  dom.app.innerHTML = `
+    <section class="game-panel">
+      <div class="screen">
+        <div class="screen-head">
+          <div>
+            <div class="stage-badge">Тренировка завершена</div>
+            <h2 class="finish-score">Вводное слово или нет</h2>
+            <p class="finish-subtitle">
+              Все лжевводные слова исключены. Раундов: ${session?.roundsPlayed || 0}. Ошибок: ${session?.mistakes || 0}.
+            </p>
+          </div>
+        </div>
+
+        <div class="action-row">
+          <button class="action-button primary" data-action="intro-word-play-again">Повторить игру</button>
+          <button class="action-button secondary" data-action="russian-home">Русский язык</button>
+          <button class="action-button secondary" data-action="go-home">На главный экран</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function getIntroWordChoiceState(word) {
+  const session = state.introWordsSession;
+  const feedback = session?.feedback;
+
+  if (!feedback) {
+    return "";
+  }
+
+  if (normalizeWord(word) === normalizeWord(feedback.answer)) {
+    return "correct";
+  }
+
+  if (normalizeWord(word) === normalizeWord(session.choice)) {
+    return "wrong";
+  }
+
+  return "";
 }
 
 function getStressLetterState(index) {
